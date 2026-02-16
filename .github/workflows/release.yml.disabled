@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.8.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Sign artifacts
+        id: sign
+        run: |
+          echo "Signing artifacts for release ${{ env.RELEASE_TAG }}..."
+
+          # Sign all registered artifacts
+          go run ./scripts/sign-manifest
+
+          # Read the generated signatures
+          public_key=$(jq -r '.public_key' .github/release-signatures.json)
+          signatures=$(jq -r '[.signatures | to_entries[] | "\(.key):\(.value)"] | join(";")' .github/release-signatures.json)
+
+          echo "SAGEOX_CLI_PUBLIC_KEY=$public_key" >> $GITHUB_OUTPUT
+          echo "SAGEOX_CLI_SIGNATURES=$signatures" >> $GITHUB_OUTPUT
+
+          # List signed artifacts for logs
+          echo "Signed artifacts:"
+          go run ./scripts/sign-manifest --list
+        env:
+          SAGEOX_CLI_SIGNING_KEY: ${{ secrets.SAGEOX_CLI_SIGNING_KEY }}
+
+      - name: Build and upload binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release -f .config/goreleaser.yml --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          SAGEOX_CLI_PUBLIC_KEY: ${{ steps.sign.outputs.SAGEOX_CLI_PUBLIC_KEY }}
+          SAGEOX_CLI_SIGNATURES: ${{ steps.sign.outputs.SAGEOX_CLI_SIGNATURES }}
+
+      - name: Release summary
+        run: |
+          echo "## Release ${{ env.RELEASE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Signed artifacts:**" >> $GITHUB_STEP_SUMMARY
+          go run ./scripts/sign-manifest --list 2>/dev/null | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Release](https://github.com/sageox/ox/releases/tag/${{ env.RELEASE_TAG }})" >> $GITHUB_STEP_SUMMARY
+        env:
+          SAGEOX_CLI_SIGNING_KEY: ${{ secrets.SAGEOX_CLI_SIGNING_KEY }}

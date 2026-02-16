@@ -1,0 +1,10 @@
+# Canonical author mappings for git shortlog, blame, and log --format="%aN"
+# Format: Canonical Name <canonical@email> Commit Name <commit@email>
+
+# Ryan Snodgrass
+Ryan Snodgrass <ryan@sageox.ai> Ryan Snodgrass <rsnodgrass@gmail.com>
+Ryan Snodgrass <ryan@sageox.ai> Ryan <2199132+rsnodgrass@users.noreply.github.com>
+Ryan Snodgrass <ryan@sageox.ai> Ryan <rsnodgrass@gmail.com>
+
+# Ajit Banerjee
+Ajit Banerjee <ajit@sageox.ai> Ajit Banerjee <ajit.banerjee@gmail.com>

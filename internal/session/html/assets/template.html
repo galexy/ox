@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - SageOx Session</title>
+    <base target="_blank">
+    <meta name="color-scheme" content="dark light">
+    <style>{{.Styles}}</style>
+</head>
+<body>
+    <script>
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('embed') === '1') document.body.classList.add('embed');
+      if (params.get('theme') === 'light') document.body.classList.add('light-theme');
+    })();
+    </script>
+    <header class="page-header">
+        <div class="header-content">
+            <div class="brand">
+                <img class="logo-large" src="https://avatars.githubusercontent.com/u/224450799?s=96" alt="SageOx Logo" width="48" height="48">
+                <div class="brand-text">
+                    <h1>SageOx</h1>
+                    <p class="subtitle">Agent Session</p>
+                </div>
+            </div>
+            <div class="header-meta">
+                <h2 class="session-title">{{.Title}}</h2>
+                <div class="meta-grid">
+                    {{if .Metadata.AgentType}}<div class="meta-item"><span class="meta-label">Agent:</span> <span class="meta-value">{{.Metadata.AgentType}}</span></div>{{end}}
+                    {{if .Metadata.Model}}<div class="meta-item"><span class="meta-label">Model:</span> <span class="meta-value">{{.Metadata.Model}}</span></div>{{end}}
+                    {{if .Metadata.Username}}<div class="meta-item"><span class="meta-label">User:</span> <span class="meta-value">{{.Metadata.Username}}</span></div>{{end}}
+                    {{if .Metadata.StartedAt}}<div class="meta-item"><span class="meta-label">Started:</span> <time class="meta-value">{{.Metadata.StartedAt.Format "2006-01-02 15:04:05"}}</time></div>{{end}}
+                    {{if .Metadata.EndedAt}}<div class="meta-item"><span class="meta-label">Ended:</span> <time class="meta-value">{{.Metadata.EndedAt.Format "2006-01-02 15:04:05"}}</time></div>{{end}}
+                    {{if .Metadata.Duration}}<div class="meta-item"><span class="meta-label">Duration:</span> <span class="meta-value">{{.Metadata.Duration}}</span></div>{{end}}
+                </div>
+            </div>
+        </div>
+        {{if .Statistics}}
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span class="stat-value">{{.Statistics.TotalMessages}}</span>
+                <span class="stat-label">Total Messages</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">{{.Statistics.UserMessages}}</span>
+                <span class="stat-label">User Messages</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">{{.Statistics.ToolCalls}}</span>
+                <span class="stat-label">Tool Calls</span>
+            </div>
+            {{if .Statistics.Duration}}
+            <div class="stat-item">
+                <span class="stat-value">{{.Statistics.Duration}}</span>
+                <span class="stat-label">Session Duration</span>
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+    </header>
+
+    {{if .Summary}}
+    <section class="summary-section">
+        <div class="summary-header">
+            <h2 class="summary-title">Session Summary</h2>
+            {{if .Summary.Outcome}}
+            <span class="outcome-badge outcome-{{.Summary.Outcome}}">{{.Summary.Outcome}}</span>
+            {{end}}
+        </div>
+        {{if .Summary.Text}}
+        <p class="summary-text">{{.Summary.Text}}</p>
+        {{end}}
+        {{if .Summary.KeyActions}}
+        <div class="key-actions">
+            <h3 class="actions-title">Key Actions</h3>
+            <ul class="actions-list">
+                {{range .Summary.KeyActions}}
+                <li>{{.}}</li>
+                {{end}}
+            </ul>
+        </div>
+        {{end}}
+        {{if .Summary.TopicsFound}}
+        <div class="topics-found">
+            {{range .Summary.TopicsFound}}
+            <span class="topic-tag">{{.}}</span>
+            {{end}}
+        </div>
+        {{end}}
+    </section>
+    {{end}}
+
+    <main id="messages" class="messages-container">
+        {{range .Messages}}
+        <article class="message message-{{.Type}}" id="msg-{{.ID}}" data-type="{{.Type}}">
+            <div class="message-header">
+                <span class="message-type message-type-{{.Type}}">{{.SenderLabel}}</span>
+                <time datetime="{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}">
+                    {{.Timestamp.Format "15:04:05"}}
+                </time>
+            </div>
+            <div class="message-content">{{.Content}}</div>
+            {{if .ToolCall}}
+            <details class="tool-details">
+                <summary class="tool-summary">
+                    <svg class="tool-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M13 3L8 8L13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="tool-name">{{if .ToolCall.Summary}}{{.ToolCall.Summary}}{{else}}{{.ToolCall.Name}}{{end}}</span>
+                </summary>
+                <div class="tool-io">
+                    {{if .ToolCall.Input}}
+                    <div class="tool-section">
+                        <h4 class="tool-section-title">Input</h4>
+                        <pre class="tool-input">{{.ToolCall.Input}}</pre>
+                    </div>
+                    {{end}}
+                    {{if .ToolCall.Output}}
+                    <div class="tool-section">
+                        <h4 class="tool-section-title">Output</h4>
+                        <pre class="tool-output">{{.ToolCall.Output}}</pre>
+                    </div>
+                    {{end}}
+                </div>
+            </details>
+            {{end}}
+        </article>
+        {{end}}
+    </main>
+
+    <footer class="page-footer">
+        <div class="footer-content">
+            <a href="https://sageox.ai/" class="footer-brand" target="_blank" rel="noopener noreferrer">
+                <img class="logo-small" src="https://avatars.githubusercontent.com/u/224450799?s=24" alt="SageOx" width="24" height="24">
+                <span>Powered by SageOx</span>
+            </a>
+        </div>
+    </footer>
+
+    <script>{{.Scripts}}</script>
+</body>
+</html>

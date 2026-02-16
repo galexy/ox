@@ -1,0 +1,317 @@
+{
+  "version": "1",
+  "commands": [
+    {
+      "pattern": "agents",
+      "target": "agent",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: agents -> agent (common LLM pattern)"
+    },
+    {
+      "pattern": "agents prime",
+      "target": "agent prime",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: agents prime -> agent prime"
+    },
+    {
+      "pattern": "prime",
+      "target": "agent prime",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Shorthand: prime -> agent prime (desire path for quick priming)"
+    },
+    {
+      "pattern": "setup",
+      "target": "init",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Synonym: setup -> init (common CLI convention)"
+    },
+    {
+      "pattern": "auth",
+      "target": "login",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "gcloud pattern: auth -> login (from gcloud auth login)"
+    },
+    {
+      "pattern": "authenticate",
+      "target": "login",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Synonym: authenticate -> login"
+    },
+    {
+      "pattern": "check",
+      "target": "doctor",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Synonym: check -> doctor (health check pattern)"
+    },
+    {
+      "pattern": "diagnose",
+      "target": "doctor",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Synonym: diagnose -> doctor"
+    },
+    {
+      "pattern": "daemons",
+      "target": "daemon",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: daemons -> daemon"
+    },
+    {
+      "pattern": "daemon ls",
+      "target": "daemon list",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Unix convention: ls -> list"
+    },
+    {
+      "pattern": "daemon stop",
+      "target": "daemon kill",
+      "has_regex": false,
+      "auto_execute": false,
+      "confidence": 0.80,
+      "description": "Synonym: stop -> kill (suggest only, not auto-execute)"
+    },
+    {
+      "pattern": "agent start",
+      "target": "agent prime",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: start -> prime (session initialization)"
+    },
+    {
+      "pattern": "agent init",
+      "target": "agent prime",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: init -> prime (session initialization)"
+    },
+    {
+      "pattern": "agent begin",
+      "target": "agent prime",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: begin -> prime (session initialization)"
+    },
+    {
+      "pattern": "agent setup",
+      "target": "agent prime",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: setup -> prime (session initialization)"
+    },
+    {
+      "pattern": "^agent close ([a-zA-Z0-9]+)$",
+      "target": "agent $1 session stop",
+      "has_regex": true,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Desire path: agent close <id> -> agent <id> session stop"
+    },
+    {
+      "pattern": "^agent ([a-zA-Z0-9]+) close$",
+      "target": "agent $1 session stop",
+      "has_regex": true,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Reorder: agent <id> close -> agent <id> session stop"
+    },
+    {
+      "pattern": "^agent ([a-zA-Z0-9]+) stop$",
+      "target": "agent $1 session stop",
+      "has_regex": true,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: agent <id> stop -> agent <id> session stop"
+    },
+    {
+      "pattern": "^agent ([a-zA-Z0-9]+) end$",
+      "target": "agent $1 session stop",
+      "has_regex": true,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: agent <id> end -> agent <id> session stop"
+    },
+    {
+      "pattern": "^agent ([a-zA-Z0-9]+) finish$",
+      "target": "agent $1 session stop",
+      "has_regex": true,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Wrong verb: agent <id> finish -> agent <id> session stop"
+    },
+    {
+      "pattern": "^agent list$",
+      "target": "daemon list",
+      "has_regex": false,
+      "auto_execute": false,
+      "confidence": 0.70,
+      "description": "Wrong subcommand: agent list -> daemon list (suggest only)"
+    },
+    {
+      "pattern": "^agent ls$",
+      "target": "daemon list",
+      "has_regex": false,
+      "auto_execute": false,
+      "confidence": 0.70,
+      "description": "Wrong subcommand: agent ls -> daemon list (suggest only)"
+    },
+    {
+      "pattern": "log",
+      "target": "daemon logs",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Shorthand: log -> daemon logs"
+    },
+    {
+      "pattern": "logs",
+      "target": "daemon logs",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Shorthand: logs -> daemon logs"
+    },
+    {
+      "pattern": "info",
+      "target": "version",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Synonym: info -> version"
+    },
+    {
+      "pattern": "release",
+      "target": "release-notes",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Shorthand: release -> release-notes"
+    },
+    {
+      "pattern": "releases",
+      "target": "release-notes",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Shorthand: releases -> release-notes"
+    },
+    {
+      "pattern": "changelog",
+      "target": "release-notes",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Synonym: changelog -> release-notes"
+    },
+    {
+      "pattern": "integrate",
+      "target": "init",
+      "has_regex": false,
+      "auto_execute": false,
+      "confidence": 0.70,
+      "description": "Ambiguous: integrate might mean init or the integrate command (suggest only)"
+    },
+    {
+      "pattern": "teams",
+      "target": "team",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: teams -> team"
+    },
+    {
+      "pattern": "sessions",
+      "target": "session",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: sessions -> session"
+    },
+    {
+      "pattern": "ledgers",
+      "target": "ledger",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: ledgers -> ledger"
+    },
+    {
+      "pattern": "configs",
+      "target": "config",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.95,
+      "description": "Pluralization: configs -> config"
+    },
+    {
+      "pattern": "signin",
+      "target": "login",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Synonym: signin -> login (common auth pattern)"
+    },
+    {
+      "pattern": "signout",
+      "target": "logout",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Synonym: signout -> logout"
+    },
+    {
+      "pattern": "disconnect",
+      "target": "logout",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Synonym: disconnect -> logout (session termination)"
+    },
+    {
+      "pattern": "health",
+      "target": "doctor",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Synonym: health -> doctor (k8s/rails pattern)"
+    },
+    {
+      "pattern": "me",
+      "target": "status",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.85,
+      "description": "Shorthand: me -> status (show current user)"
+    },
+    {
+      "pattern": "whoami",
+      "target": "status",
+      "has_regex": false,
+      "auto_execute": true,
+      "confidence": 0.90,
+      "description": "Unix pattern: whoami -> status"
+    }
+  ]
+}

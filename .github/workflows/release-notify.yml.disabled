@@ -1,0 +1,112 @@
+name: Release Notifications
+
+on:
+  release:
+    types: [created, published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to notify about (for testing)'
+        required: false
+
+jobs:
+  notify-release:
+    # Only run on actual release events, not push
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get release details
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get tag from event or input
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # Determine status (draft or published)
+          if [ "${{ github.event.release.draft }}" = "true" ]; then
+            STATUS="📝 Draft"
+            EMOJI="📝"
+          else
+            STATUS="✅ Published"
+            EMOJI="📦"
+          fi
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
+
+          # Fetch release details including body (changelog)
+          RELEASE=$(gh release view "$TAG" --repo ${{ github.repository }} --json tagName,name,body,url 2>/dev/null || echo '{}')
+
+          if [ "$RELEASE" = "{}" ]; then
+            # Release may not be accessible yet, use event data
+            NAME="${{ github.event.release.name }}"
+            URL="${{ github.event.release.html_url }}"
+            BODY="${{ github.event.release.body }}"
+          else
+            NAME=$(echo "$RELEASE" | jq -r '.name // .tagName')
+            URL=$(echo "$RELEASE" | jq -r '.url')
+            BODY=$(echo "$RELEASE" | jq -r '.body')
+          fi
+
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+          # Extract changelog - trim to reasonable length for Chat
+          # Remove markdown headers and limit to ~1500 chars
+          CHANGELOG=$(echo "$BODY" | sed 's/^##.*//g' | sed 's/^#.*//g' | head -c 1500)
+          if [ ${#BODY} -gt 1500 ]; then
+            CHANGELOG="${CHANGELOG}..."
+          fi
+
+          # Store changelog with heredoc for multiline
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send Google Chat notification
+        if: ${{ secrets.GOOGLE_CHAT_WEBHOOK != '' }}
+        env:
+          GOOGLE_CHAT_WEBHOOK: ${{ secrets.GOOGLE_CHAT_WEBHOOK }}
+          TAG: ${{ steps.release.outputs.tag }}
+          NAME: ${{ steps.release.outputs.name }}
+          URL: ${{ steps.release.outputs.url }}
+          STATUS: ${{ steps.release.outputs.status }}
+          EMOJI: ${{ steps.release.outputs.emoji }}
+          CHANGELOG: ${{ steps.release.outputs.changelog }}
+        run: |
+          # Escape for JSON (newlines and quotes)
+          ESCAPED_CHANGELOG=$(echo "$CHANGELOG" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
+          curl -X POST "$GOOGLE_CHAT_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"cards\": [{
+                \"header\": {
+                  \"title\": \"${EMOJI} ox ${TAG}\",
+                  \"subtitle\": \"${STATUS}\"
+                },
+                \"sections\": [{
+                  \"widgets\": [{
+                    \"textParagraph\": {
+                      \"text\": \"${ESCAPED_CHANGELOG}\"
+                    }
+                  }, {
+                    \"buttons\": [{
+                      \"textButton\": {
+                        \"text\": \"View Release\",
+                        \"onClick\": {
+                          \"openLink\": {
+                            \"url\": \"${URL}\"
+                          }
+                        }
+                      }
+                    }]
+                  }]
+                }]
+              }]
+            }"

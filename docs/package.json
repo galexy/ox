@@ -1,0 +1,17 @@
+{
+  "description": "Generated CLI reference docs for ox",
+  "files": [
+    "reference/**/*.mdx"
+  ],
+  "main": "index.js",
+  "name": "@sageox/cli-docs",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "directory": "docs",
+    "type": "git",
+    "url": "https://github.com/sageox/ox.git"
+  },
+  "version": "0.16.0"
+}

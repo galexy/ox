@@ -1,0 +1,67 @@
+# binaries
+/bin/
+/ox
+/dist/
+/tmp/
+
+# go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# dependencies
+/vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# environment
+.env
+.env.local
+
+# development keys (never commit private keys)
+*.pem.dev
+**/keys/private.pem
+
+# test coverage
+coverage/
+
+# test session artifacts
+internal/session/sessions/
+
+# beads profiling/debug files
+bd-*
+*.prof
+
+# generated docs - raw markdown only (MDX is manually curated)
+docs/reference/*.md
+!docs/reference/.gitkeep
+
+# SageOx - this repo is the tool, not a SageOx-enabled project
+# Never commit .sageox/ to ox itself
+sessions/
+
+# Claude plugin cache/install artifacts (not our source)
+.claude-plugin/
+# But DO track our plugin marketplace and manifest
+!/.claude-plugin/
+!/claude-plugin/.claude-plugin/
+
+# Claude Code local settings (user-specific)
+.claude/settings.local.json
+demo/credentials.sops.yaml
+demo/playwright/node_modules/
+.team-contexts/

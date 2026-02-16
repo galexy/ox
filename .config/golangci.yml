@@ -1,0 +1,76 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - govet
+    - staticcheck
+
+    # Security
+    - gosec
+
+    # Error handling
+    - errorlint
+
+    # Code quality
+    - misspell
+    - unconvert
+
+    # Logging consistency
+    - sloglint
+
+    # Test patterns
+    - paralleltest
+
+  settings:
+    misspell:
+      locale: US
+
+    paralleltest:
+      ignore-missing: true
+      ignore-missing-subtests: true
+
+    gosec:
+      severity: medium
+      confidence: medium
+      # Exclude rules inappropriate for CLI tools
+      excludes:
+        - G204  # subprocess with variable - CLI runs git commands
+        - G301  # directory perms - CLI needs readable config dirs
+        - G302  # file perms - CLI needs readable config files
+        - G304  # file inclusion via variable - CLI reads user files
+        - G306  # WriteFile perms - CLI needs readable config files
+        - G404  # weak random - used for sampling, not crypto
+
+    sloglint:
+      kv-only: true
+      attr-only: false
+
+  exclusions:
+    rules:
+      # Test files - exclude security, strict error checks, and logging strictness
+      - path: _test\.go
+        linters:
+          - gosec
+          - errorlint
+          - sloglint
+
+      # Generated files - exclude all linters
+      - path: _generated\.go
+        linters:
+          - govet
+          - staticcheck
+          - gosec
+          - errorlint
+          - misspell
+          - unconvert
+          - sloglint
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10

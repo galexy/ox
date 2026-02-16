@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Mock ox CLI for demo recording.
+# Produces clean, success-only output matching the real ox CLI theme.
+#
+# Usage: Add demo/mock/ to PATH before running demo.tape
+#   export PATH="$(pwd)/demo/mock:$PATH"
+
+# Colors (ox CLI dark theme - true color)
+G='\033[38;2;122;143;120m'      # sage green (success/primary)
+GB='\033[1;38;2;122;143;120m'   # sage green bold (section headers)
+C='\033[38;2;224;165;106m'      # copper gold (secondary/commands)
+CB='\033[1;38;2;224;165;106m'   # copper gold bold
+DM='\033[38;2;143;153;163m'     # dim gray
+B='\033[1m'                      # bold
+R='\033[0m'                      # reset
+
+mock_login() {
+    echo "Initiating device authentication flow..."
+    echo ""
+    echo "Visit: https://sageox.ai/device"
+    echo "Enter code: ZYNZVRRA"
+    echo ""
+    sleep 3
+    printf "${G}✓ Successfully authenticated${R}\n"
+    echo ""
+    printf "${G}Welcome back, ${GB}Oxy${G}!${R}\n"
+    echo "You're signed in as ox@sageox.ai"
+    echo ""
+    printf "${G}✓${R} Git credentials synced\n"
+    echo "Run 'ox status' to see current status of ox."
+    echo ""
+    printf "${C}✦${R} Next: ${C}ox status${R} — verify your authentication and project setup\n"
+}
+
+mock_init() {
+    printf "${DM}Using endpoint: https://sageox.ai${R}\n"
+    echo ""
+    printf "${GB}SELECT ENDPOINT${R}\n"
+    echo "Choose which SageOx endpoint to initialize with."
+    echo ""
+    sleep 0.5
+    printf "Using endpoint: ${B}sageox.ai${R}\n"
+    echo ""
+    printf "${GB}REPOSITORY SETUP${R}\n"
+    sleep 0.2
+    printf "${G}✓${R} Created .sageox/ directory\n"
+    sleep 0.1
+    printf "${G}✓${R} Created .sageox/.repo_019c2a28-3596-7ea9-a51e-86fc6c9a3e1f marker\n"
+    sleep 0.1
+    printf "${G}✓${R} Created .sageox/config.json\n"
+    sleep 0.1
+    printf "${G}✓${R} Updated .sageox/config.json with repository metadata\n"
+    sleep 0.1
+    printf "${G}✓${R} Created .sageox/README.md\n"
+    sleep 0.1
+    printf "${G}✓${R} Created .sageox/.gitignore\n"
+    sleep 0.1
+    printf "${G}✓${R} Added SageOx entries to .gitattributes\n"
+    echo ""
+    printf "${GB}AGENT INTEGRATION${R}\n"
+    sleep 0.2
+    printf "${G}✓${R} Injected 'ox agent prime' into AGENTS.md\n"
+    sleep 0.1
+    printf "${G}✓${R} Installed 7 Claude command(s)\n"
+    echo ""
+    printf "${GB}GIT & REGISTRATION${R}\n"
+    sleep 0.2
+    printf "${G}✓${R} Staged files in git\n"
+    sleep 0.1
+    printf "${G}✓${R} Registered with SageOx (team: team_fl0ur1sh0x)\n"
+    sleep 0.1
+    printf "${G}✓${R} Git credentials synced\n"
+    echo ""
+    echo "════════════════════════════════════════════════════════════"
+    printf "${B}SageOx initialized successfully!${R}\n"
+    echo "════════════════════════════════════════════════════════════"
+    echo ""
+    printf "${GB}NEXT STEPS${R}\n"
+    echo "  1. Start your AI coding agent (Claude Code, Cursor, etc.)"
+    printf "  2. Agent should auto-run: ${C}ox agent prime${R}\n"
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    printf "${DM}Other commands:${R}\n"
+    printf "  ${C}ox doctor${R}    – Check SageOx health\n"
+    printf "  ${C}ox view team${R} – Open team dashboard\n"
+    printf "  ${C}ox view repo${R} – Open repo dashboard\n"
+    echo ""
+    printf "${C}✦${R} ${C}ox doctor --verbose${R} shows detailed check information\n"
+}
+
+mock_status() {
+    printf "${B}Authentication Status${R}\n"
+    printf "${DM}────────────────────${R}\n"
+    printf "Endpoint          ${G}sageox.ai${R} (${G}✓ logged in${R})\n"
+    printf "User              ${G}Oxy${R} <ox@sageox.ai>\n"
+    printf "Token expires     2026-02-11 11:33:49 PST (${DM}/Users/oxy/.config/sageox/auth.json${R})\n"
+    echo ""
+    printf "${B}Configuration${R}\n"
+    printf "${DM}────────────────────${R}\n"
+    printf "User config dir   ${G}✓${R} /Users/oxy/.config/sageox\n"
+    echo ""
+    printf "${B}Project Status${R}\n"
+    printf "${DM}────────────────────${R}\n"
+    echo "Repo directory    /Users/oxy/code/myproject"
+    printf "  SageOx state    └── .sageox/ ${G}✓${R}\n"
+    echo ""
+    printf "${B}Ledger${R}\n"
+    printf "${DM}────────────────────${R}\n"
+    echo "sageox.ai   /Users/oxy/code/myproject_sageox/sageox.ai/ledger"
+    printf "  Status          ${G}✓ clean${R}\n"
+    echo "  Remote          https://git.sageox.ai/sageox-team_fl0ur1sh0x/repo_019c2a28-3596-7ea9-a51e-86fc6c9a3e1f.git"
+    echo "  Branch          main"
+    echo ""
+    printf "${B}Team Context${R}\n"
+    printf "${DM}────────────────────${R}\n"
+    printf "Team              ${B}team_fl0ur1sh0x${R}\n"
+    echo "  Path            /Users/oxy/.local/share/sageox/sageox.ai/teams/team_fl0ur1sh0x"
+    printf "  Status          ${G}✓ clean${R}\n"
+    echo "  Branch          main"
+    echo ""
+    printf "${B}Daemon Sync${R}\n"
+    printf "${DM}────────────────────${R}\n"
+    printf "Status            ${G}✓ running, syncing${R} (pid 20966)\n"
+    echo "Total syncs       2"
+    echo ""
+    printf "Syncing           ${B}2 workspace(s)${R}\n"
+    printf "  📁 ledger         ${G}✓${R} /Users/oxy/code/myproject_sageox/sageox.ai/ledger\n"
+    printf "  📁 team_fl0ur1sh0x ${G}✓${R} /Users/oxy/.local/share/sageox/sageox.ai/teams/team_fl0ur1sh0x\n"
+    echo ""
+    printf "${C}✦${R} Use ${C}ox logout${R} to clear credentials when switching accounts\n"
+}
+
+case "${1:-}" in
+    login)  mock_login ;;
+    init)   mock_init ;;
+    status) mock_status ;;
+    *)      echo "ox: unknown command '${1:-}'"; exit 1 ;;
+esac

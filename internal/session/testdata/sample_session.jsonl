@@ -1,0 +1,9 @@
+{"_meta":{"schema_version":"1","agent_type":"claude-code","session_id":"test-session-001","started_at":"2026-01-17T10:00:00Z"}}
+{"ts":"2026-01-17T10:00:01Z","type":"user","content":"What is 2 + 2?","seq":1}
+{"ts":"2026-01-17T10:00:02Z","type":"assistant","content":"2 + 2 equals 4.","seq":2}
+{"ts":"2026-01-17T10:00:05Z","type":"user","content":"Run ox version","seq":3}
+{"ts":"2026-01-17T10:00:06Z","type":"tool","tool":"Bash","tool_input":{"command":"ox version"},"seq":4}
+{"ts":"2026-01-17T10:00:07Z","type":"tool_result","result":"ox version 0.7.0","seq":5}
+{"ts":"2026-01-17T10:00:08Z","type":"assistant","content":"The ox CLI is version 0.7.0.","seq":6}
+{"ts":"2026-01-17T10:00:10Z","type":"user","content":"Say test complete","seq":7}
+{"ts":"2026-01-17T10:00:11Z","type":"assistant","content":"test complete","seq":8}

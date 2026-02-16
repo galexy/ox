@@ -1,0 +1,80 @@
+# GoReleaser configuration for sageox
+# See https://goreleaser.com for documentation
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ox
+    main: ./cmd/ox
+    binary: ox
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/sageox/ox/internal/version.Version={{.Version}}
+      - -X github.com/sageox/ox/internal/version.GitCommit={{.ShortCommit}}
+      - -X github.com/sageox/ox/internal/version.BuildDate={{.Date}}
+      # SageOx release signatures (set via SAGEOX_CLI_PUBLIC_KEY and SAGEOX_CLI_SIGNATURES env vars)
+      # Signs all embedded artifacts: redaction policy, guidance, etc.
+      - -X 'github.com/sageox/ox/internal/signing.EmbeddedPublicKey={{ .Env.SAGEOX_CLI_PUBLIC_KEY }}'
+      - -X 'github.com/sageox/ox/internal/signing.EmbeddedSignatures={{ .Env.SAGEOX_CLI_SIGNATURES }}'
+
+archives:
+  - id: ox-archive
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Changelog disabled - we use human-written release notes
+# Auto-generated changelogs with commit hashes confuse users
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: sageox
+    name: ox
+  # Keep existing release notes written by humans
+  # GoReleaser only uploads binaries, doesn't touch notes
+  mode: keep
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+brews:
+  - name: ox
+    repository:
+      owner: sageox
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://sageox.ai"
+    description: "Shared team context that makes agentic engineering multiplayer"
+    license: "MIT"
+    install: |
+      bin.install "ox"
+    test: |
+      system "#{bin}/ox", "version"
+
+announce:
+  skip: false

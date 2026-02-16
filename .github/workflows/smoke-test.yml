@@ -1,0 +1,56 @@
+# Cloud Smoke Test Workflow
+#
+# Runs core ox CLI commands against SageOx test server to verify functionality.
+# This workflow warns on failure but does NOT block PRs from merging.
+#
+# Required secrets:
+#   SAGEOX_TEST_ENDPOINT - Test server URL (e.g., https://test.sageox.ai)
+#   SAGEOX_CI_PASSWORD - Password for test-ox-cli@sageox.ai account
+
+name: Cloud Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+  workflow_dispatch:        # manual trigger
+
+# don't cancel in-progress runs for scheduled/manual triggers
+concurrency:
+  group: smoke-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    # continue even if smoke tests fail - this is a warning, not a blocker
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Build ox
+        run: make build
+
+      - name: Run smoke tests
+        id: smoke-test
+        run: ./scripts/smoketest/smoke-test.sh
+        env:
+          SAGEOX_ENDPOINT: ${{ secrets.SAGEOX_TEST_ENDPOINT }}
+          SAGEOX_CI_PASSWORD: ${{ secrets.SAGEOX_CI_PASSWORD }}
+
+      - name: Smoke test summary
+        if: always()
+        run: |
+          if [ "${{ steps.smoke-test.outcome }}" == "failure" ]; then
+            echo "::warning::Smoke tests failed - ox CLI may have compatibility issues with the cloud"
+          else
+            echo "Smoke tests passed"
+          fi

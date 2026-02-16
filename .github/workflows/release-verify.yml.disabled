@@ -1,0 +1,118 @@
+name: Release Verification
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to verify (e.g., v0.10.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets (poll via gh CLI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "Waiting for GoReleaser to upload assets for $TAG..."
+
+          # Poll for checksums.txt with exponential backoff using gh CLI (works with private repos)
+          MAX_ATTEMPTS=20
+          ATTEMPT=1
+          WAIT=10
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: checking for checksums.txt..."
+
+            # Use gh API to check if checksums.txt exists in release assets
+            ASSET_COUNT=$(gh api "repos/${{ github.repository }}/releases/tags/${TAG}" \
+              --jq '.assets | map(select(.name == "checksums.txt")) | length' 2>/dev/null || echo "0")
+
+            if [ "$ASSET_COUNT" = "1" ]; then
+              echo "checksums.txt is available!"
+              break
+            fi
+
+            echo "Not ready yet (asset count: $ASSET_COUNT), waiting ${WAIT}s..."
+            sleep $WAIT
+
+            ATTEMPT=$((ATTEMPT + 1))
+            # Cap wait time at 30s
+            [ $WAIT -lt 30 ] && WAIT=$((WAIT + 5))
+          done
+
+          if [ $ATTEMPT -gt $MAX_ATTEMPTS ]; then
+            echo "Timed out waiting for release assets"
+            exit 1
+          fi
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "Downloading release artifacts for: $TAG"
+
+          # Use gh release download for private repo support
+          gh release download "$TAG" --repo ${{ github.repository }} --pattern "checksums.txt"
+          gh release download "$TAG" --repo ${{ github.repository }} --pattern "ox_${TAG#v}_linux_amd64.tar.gz"
+
+      - name: Verify checksums
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "Verifying checksums..."
+          sha256sum -c checksums.txt --ignore-missing
+
+      - name: Extract and test binary
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          tar -xzf "ox_${TAG#v}_linux_amd64.tar.gz"
+          chmod +x ox
+
+          # Get raw version output (strip ANSI codes)
+          RAW_VERSION=$(./ox version 2>&1 | head -1 | sed 's/\x1b\[[0-9;]*m//g')
+          echo "Raw version output: $RAW_VERSION"
+
+          # Extract version number (handles both 'ox v0.11.0' and 'ox v0.11.0-5-gabcdef')
+          BINARY_VERSION=$(echo "$RAW_VERSION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+          EXPECTED_VERSION="${TAG#v}"
+
+          echo "Binary version: $BINARY_VERSION"
+          echo "Expected version: $EXPECTED_VERSION"
+
+          if [ "$BINARY_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch: binary=$BINARY_VERSION, expected=$EXPECTED_VERSION"
+            exit 1
+          fi
+
+          echo "Version verified: $BINARY_VERSION"
+
+      - name: Run ox doctor (offline check)
+        run: |
+          # Run doctor in offline mode to verify binary integrity
+          ./ox doctor --json 2>/dev/null || echo "Doctor check completed (some checks may require auth)"
+
+      - name: Summary
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "## Release Verification: $TAG" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Checksums verified" >> $GITHUB_STEP_SUMMARY
+          echo "- Binary version matches tag" >> $GITHUB_STEP_SUMMARY
+          echo "- Binary executes successfully" >> $GITHUB_STEP_SUMMARY

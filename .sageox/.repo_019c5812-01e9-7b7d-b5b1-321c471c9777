@@ -1,0 +1,21 @@
+{
+  "repo_id": "repo_019c5812-01e9-7b7d-b5b1-321c471c9777",
+  "type": "git",
+  "init_at": "2026-02-13T17:35:01Z",
+  "init_by_email": "ajit.banerjee@gmail.com",
+  "init_by_name": "Ajit Banerjee",
+  "repo_salt": "981116cb160bdd5b616abe7c0cbb28430b2b5021",
+  "endpoint": "https://sageox.ai",
+  "fingerprint": {
+    "first_commit": "981116cb160bdd5b616abe7c0cbb28430b2b5021",
+    "monthly_checkpoints": {
+      "2026-02": "981116cb160bdd5b616abe7c0cbb28430b2b5021"
+    },
+    "ancestry_samples": [
+      "981116cb160bdd5b616abe7c0cbb28430b2b5021"
+    ],
+    "remote_hashes": [
+      "sha256:564c657ba301fb5385361924446cd20e9dcb727b84ae77178acc3476a9349daa"
+    ]
+  }
+}

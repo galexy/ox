@@ -1,0 +1,588 @@
+package adapters
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestClaudeCodeAdapter_Name(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+	assert.Equal(t, "claude-code", adapter.Name())
+}
+
+func TestClaudeCodeAdapter_Detect(t *testing.T) {
+	// reset registry between tests
+	defer ResetRegistry()
+
+	t.Run("detects claude code environment var", func(t *testing.T) {
+		// save and restore env
+		old := os.Getenv("CLAUDE_CODE_ENTRYPOINT")
+		defer os.Setenv("CLAUDE_CODE_ENTRYPOINT", old)
+
+		os.Setenv("CLAUDE_CODE_ENTRYPOINT", "/some/path")
+
+		adapter := &ClaudeCodeAdapter{}
+		assert.True(t, adapter.Detect(), "Detect() should return true when CLAUDE_CODE_ENTRYPOINT is set")
+	})
+}
+
+func TestClaudeCodeAdapter_ParseLine_UserMessage(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	tests := []struct {
+		name     string
+		jsonl    string
+		wantRole string
+		wantText string
+	}{
+		{
+			name: "simple user message with string content",
+			jsonl: `{
+				"type": "user",
+				"timestamp": "2026-01-05T10:00:00.000Z",
+				"message": {
+					"role": "user",
+					"content": "Hello, please help me with this code."
+				}
+			}`,
+			wantRole: "user",
+			wantText: "Hello, please help me with this code.",
+		},
+		{
+			name: "user message with tool result",
+			jsonl: `{
+				"type": "user",
+				"timestamp": "2026-01-05T10:00:00.000Z",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_123",
+							"type": "tool_result",
+							"content": "File created successfully"
+						}
+					]
+				}
+			}`,
+			wantRole: "user",
+			wantText: "File created successfully",
+		},
+		{
+			name: "user message with text array",
+			jsonl: `{
+				"type": "user",
+				"timestamp": "2026-01-05T10:00:00.000Z",
+				"message": {
+					"role": "user",
+					"content": [
+						{"type": "text", "text": "First part"},
+						{"type": "text", "text": "Second part"}
+					]
+				}
+			}`,
+			wantRole: "user",
+			wantText: "First part\nSecond part",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := adapter.parseLine([]byte(tt.jsonl))
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			assert.Equal(t, tt.wantRole, entry.Role)
+			assert.Equal(t, tt.wantText, entry.Content)
+		})
+	}
+}
+
+func TestClaudeCodeAdapter_ParseLine_AssistantMessage(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	tests := []struct {
+		name         string
+		jsonl        string
+		wantRole     string
+		wantContent  string
+		wantToolName string
+	}{
+		{
+			name: "assistant text response",
+			jsonl: `{
+				"type": "assistant",
+				"timestamp": "2026-01-05T10:00:00.000Z",
+				"message": {
+					"role": "assistant",
+					"content": [
+						{"type": "text", "text": "I'll help you with that code."}
+					]
+				}
+			}`,
+			wantRole:    "assistant",
+			wantContent: "I'll help you with that code.",
+		},
+		{
+			name: "assistant tool use",
+			jsonl: `{
+				"type": "assistant",
+				"timestamp": "2026-01-05T10:00:00.000Z",
+				"message": {
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_123",
+							"name": "Read",
+							"input": {"file_path": "/path/to/file.go"}
+						}
+					]
+				}
+			}`,
+			wantRole:     "tool",
+			wantToolName: "Read",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := adapter.parseLine([]byte(tt.jsonl))
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			assert.Equal(t, tt.wantRole, entry.Role)
+			if tt.wantContent != "" {
+				assert.Equal(t, tt.wantContent, entry.Content)
+			}
+			if tt.wantToolName != "" {
+				assert.Equal(t, tt.wantToolName, entry.ToolName)
+			}
+		})
+	}
+}
+
+func TestClaudeCodeAdapter_ParseLine_SkipsNonConversation(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	skippedTypes := []string{
+		`{"type": "file-history-snapshot", "timestamp": "2026-01-05T10:00:00.000Z"}`,
+		`{"type": "queue-operation", "timestamp": "2026-01-05T10:00:00.000Z"}`,
+		`{"type": "summary", "timestamp": "2026-01-05T10:00:00.000Z"}`,
+	}
+
+	for _, jsonl := range skippedTypes {
+		entry, err := adapter.parseLine([]byte(jsonl))
+		assert.NoError(t, err, "parseLine(%s) should not error", jsonl)
+		assert.Nil(t, entry, "parseLine(%s) should return nil for non-conversation type", jsonl)
+	}
+}
+
+func TestClaudeCodeAdapter_ParseLine_Timestamp(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	jsonl := `{
+		"type": "user",
+		"timestamp": "2026-01-05T10:30:45.123Z",
+		"message": {"role": "user", "content": "test"}
+	}`
+
+	entry, err := adapter.parseLine([]byte(jsonl))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+
+	expected := time.Date(2026, 1, 5, 10, 30, 45, 123000000, time.UTC)
+	assert.True(t, entry.Timestamp.Equal(expected), "Timestamp = %v, want %v", entry.Timestamp, expected)
+}
+
+func TestClaudeCodeAdapter_ParseLine_ToolInput(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	jsonl := `{
+		"type": "assistant",
+		"timestamp": "2026-01-05T10:00:00.000Z",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "tool_use",
+					"id": "toolu_456",
+					"name": "Grep",
+					"input": {"pattern": "func.*Test", "-i": true}
+				}
+			]
+		}
+	}`
+
+	entry, err := adapter.parseLine([]byte(jsonl))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+
+	assert.Equal(t, "Grep", entry.ToolName)
+
+	// verify tool input is valid JSON
+	var input map[string]interface{}
+	err = json.Unmarshal([]byte(entry.ToolInput), &input)
+	require.NoError(t, err, "ToolInput should be valid JSON")
+	assert.Equal(t, "func.*Test", input["pattern"])
+}
+
+func TestClaudeCodeAdapter_Read(t *testing.T) {
+	// create temp file with sample JSONL
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "test-session.jsonl")
+
+	content := `{"type": "file-history-snapshot", "timestamp": "2026-01-05T10:00:00.000Z"}
+{"type": "user", "timestamp": "2026-01-05T10:00:01.000Z", "message": {"role": "user", "content": "Hello"}}
+{"type": "assistant", "timestamp": "2026-01-05T10:00:02.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]}}
+{"type": "assistant", "timestamp": "2026-01-05T10:00:03.000Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/test.go"}}]}}
+`
+
+	err := os.WriteFile(sessionFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	adapter := &ClaudeCodeAdapter{}
+	entries, err := adapter.Read(sessionFile)
+	require.NoError(t, err)
+
+	// should have 3 entries (skips file-history-snapshot)
+	require.Len(t, entries, 3)
+
+	// verify entry types
+	assert.Equal(t, "user", entries[0].Role)
+	assert.Equal(t, "assistant", entries[1].Role)
+	assert.Equal(t, "tool", entries[2].Role)
+}
+
+func TestClaudeCodeAdapter_Watch(t *testing.T) {
+	// create temp file
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "watch-session.jsonl")
+
+	// create initial file
+	err := os.WriteFile(sessionFile, []byte(""), 0644)
+	require.NoError(t, err)
+
+	adapter := &ClaudeCodeAdapter{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ch, err := adapter.Watch(ctx, sessionFile)
+	require.NoError(t, err)
+
+	// give watcher time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// append new entry to file
+	newEntry := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "message": {"role": "user", "content": "New message"}}` + "\n"
+	f, err := os.OpenFile(sessionFile, os.O_APPEND|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = f.WriteString(newEntry)
+	require.NoError(t, err)
+	f.Close()
+
+	// wait for entry to arrive
+	select {
+	case entry, ok := <-ch:
+		require.True(t, ok, "channel closed unexpectedly")
+		assert.Equal(t, "user", entry.Role)
+		assert.Equal(t, "New message", entry.Content)
+	case <-ctx.Done():
+		t.Error("timeout waiting for watched entry")
+	}
+}
+
+func TestClaudeCodeAdapter_Watch_RapidWrites(t *testing.T) {
+	// this test verifies that rapid writes don't cause parse errors
+	// due to reading partial JSON during mid-write
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "rapid-write-session.jsonl")
+
+	// create initial file
+	err := os.WriteFile(sessionFile, []byte(""), 0644)
+	require.NoError(t, err)
+
+	adapter := &ClaudeCodeAdapter{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := adapter.Watch(ctx, sessionFile)
+	require.NoError(t, err)
+
+	// give watcher time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// write multiple entries rapidly to simulate real-world rapid writes
+	numEntries := 10
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		f, err := os.OpenFile(sessionFile, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			t.Errorf("failed to open file: %v", err)
+			return
+		}
+		defer f.Close()
+
+		for i := 0; i < numEntries; i++ {
+			entry := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "message": {"role": "user", "content": "Message ` + string(rune('A'+i)) + `"}}` + "\n"
+			// write in small chunks to simulate partial writes
+			for j := 0; j < len(entry); j += 10 {
+				end := j + 10
+				if end > len(entry) {
+					end = len(entry)
+				}
+				if _, err := f.WriteString(entry[j:end]); err != nil {
+					t.Errorf("write error: %v", err)
+					return
+				}
+				// tiny delay to increase chance of partial read without debouncing
+				time.Sleep(1 * time.Millisecond)
+			}
+			f.Sync()
+		}
+	}()
+
+	// collect received entries
+	var received []RawEntry
+	timeout := time.After(3 * time.Second)
+
+collectLoop:
+	for {
+		select {
+		case entry, ok := <-ch:
+			if !ok {
+				break collectLoop
+			}
+			received = append(received, entry)
+			if len(received) >= numEntries {
+				break collectLoop
+			}
+		case <-timeout:
+			break collectLoop
+		case <-ctx.Done():
+			break collectLoop
+		}
+	}
+
+	wg.Wait()
+
+	// verify we got all entries without parse errors
+	assert.Len(t, received, numEntries)
+
+	// verify entries are valid (not corrupted)
+	for i, entry := range received {
+		assert.Equal(t, "user", entry.Role, "entry[%d].Role should be 'user'", i)
+		assert.NotEmpty(t, entry.Content, "entry[%d].Content should not be empty", i)
+	}
+}
+
+func TestClaudeCodeAdapter_Watch_Debounce(t *testing.T) {
+	// this test verifies debounce coalesces multiple rapid events into one read
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "debounce-session.jsonl")
+
+	// create initial file
+	err := os.WriteFile(sessionFile, []byte(""), 0644)
+	require.NoError(t, err)
+
+	adapter := &ClaudeCodeAdapter{}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	ch, err := adapter.Watch(ctx, sessionFile)
+	require.NoError(t, err)
+
+	// give watcher time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// write two entries very quickly (within debounce window)
+	f, err := os.OpenFile(sessionFile, os.O_APPEND|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+
+	entry1 := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "message": {"role": "user", "content": "First"}}` + "\n"
+	entry2 := `{"type": "user", "timestamp": "2026-01-05T10:00:01.000Z", "message": {"role": "user", "content": "Second"}}` + "\n"
+
+	_, err = f.WriteString(entry1)
+	require.NoError(t, err)
+	// write second entry within debounce delay
+	time.Sleep(10 * time.Millisecond)
+	_, err = f.WriteString(entry2)
+	require.NoError(t, err)
+	f.Close()
+
+	// both entries should be received (debounce should wait for writes to complete)
+	var received []RawEntry
+	timeout := time.After(500 * time.Millisecond)
+
+collectLoop:
+	for {
+		select {
+		case entry, ok := <-ch:
+			if !ok {
+				break collectLoop
+			}
+			received = append(received, entry)
+			if len(received) >= 2 {
+				break collectLoop
+			}
+		case <-timeout:
+			break collectLoop
+		}
+	}
+
+	assert.Len(t, received, 2)
+	if len(received) >= 1 {
+		assert.Equal(t, "First", received[0].Content)
+	}
+	if len(received) >= 2 {
+		assert.Equal(t, "Second", received[1].Content)
+	}
+}
+
+func TestClaudeCodeAdapter_SessionContainsAgentID(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "search-session.jsonl")
+
+	// write session with agent ID embedded in user message
+	content := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "message": {"role": "user", "content": "Agent ID: agent-abc123-xyz"}}
+{"type": "assistant", "timestamp": "2026-01-05T10:00:01.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Response"}]}}
+`
+	err := os.WriteFile(sessionFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	adapter := &ClaudeCodeAdapter{}
+
+	// should find the agent ID
+	assert.True(t, adapter.sessionContainsAgentID(sessionFile, "agent-abc123-xyz"),
+		"sessionContainsAgentID() should return true for existing ID")
+
+	// should not find non-existent ID
+	assert.False(t, adapter.sessionContainsAgentID(sessionFile, "agent-nonexistent"),
+		"sessionContainsAgentID() should return false for non-existent ID")
+}
+
+func TestClaudeCodeAdapter_RawEntry(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	jsonl := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "sessionId": "abc123", "message": {"role": "user", "content": "test"}}`
+
+	entry, err := adapter.parseLine([]byte(jsonl))
+	require.NoError(t, err)
+
+	// verify Raw field contains original JSON
+	require.NotNil(t, entry.Raw, "Raw field should not be nil")
+
+	var raw map[string]interface{}
+	err = json.Unmarshal(entry.Raw, &raw)
+	require.NoError(t, err, "Raw field should be valid JSON")
+	assert.Equal(t, "abc123", raw["sessionId"])
+}
+
+func TestClaudeCodeAdapter_ThinkingBlocks(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	// assistant message with thinking block should skip it
+	jsonl := `{
+		"type": "assistant",
+		"timestamp": "2026-01-05T10:00:00.000Z",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{"type": "thinking", "thinking": "Let me think about this..."},
+				{"type": "text", "text": "Here's my answer."}
+			]
+		}
+	}`
+
+	entry, err := adapter.parseLine([]byte(jsonl))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+
+	// should return the text, not thinking
+	assert.Equal(t, "Here's my answer.", entry.Content)
+}
+
+func TestClaudeCodeAdapter_MetaMessages(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+
+	// meta messages should still be parsed
+	jsonl := `{
+		"type": "user",
+		"timestamp": "2026-01-05T10:00:00.000Z",
+		"isMeta": true,
+		"message": {
+			"role": "user",
+			"content": "Caveat: The messages below were generated by local commands."
+		}
+	}`
+
+	entry, err := adapter.parseLine([]byte(jsonl))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+
+	assert.Equal(t, "user", entry.Role)
+}
+
+func TestClaudeCodeAdapter_ReadMetadata(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "metadata-session.jsonl")
+
+	// test session with version and model
+	content := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "version": "1.0.3", "message": {"role": "user", "content": "Hello"}}
+{"type": "assistant", "timestamp": "2026-01-05T10:00:01.000Z", "message": {"role": "assistant", "model": "claude-sonnet-4-20250514", "content": [{"type": "text", "text": "Hi there"}]}}
+`
+	err := os.WriteFile(sessionFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	meta, err := adapter.ReadMetadata(sessionFile)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+
+	assert.Equal(t, "1.0.3", meta.AgentVersion)
+	assert.Equal(t, "claude-sonnet-4-20250514", meta.Model)
+}
+
+func TestClaudeCodeAdapter_ReadMetadata_EmptyFile(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "empty-session.jsonl")
+
+	// write empty file
+	err := os.WriteFile(sessionFile, []byte(""), 0644)
+	require.NoError(t, err)
+
+	meta, err := adapter.ReadMetadata(sessionFile)
+	require.NoError(t, err)
+
+	// should return nil for empty file
+	assert.Nil(t, meta, "ReadMetadata() should return nil for empty file")
+}
+
+func TestClaudeCodeAdapter_ReadMetadata_NoModel(t *testing.T) {
+	adapter := &ClaudeCodeAdapter{}
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "no-model-session.jsonl")
+
+	// session with version but no model
+	content := `{"type": "user", "timestamp": "2026-01-05T10:00:00.000Z", "version": "1.0.3", "message": {"role": "user", "content": "Hello"}}
+`
+	err := os.WriteFile(sessionFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	meta, err := adapter.ReadMetadata(sessionFile)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+
+	// should have version but no model
+	assert.Equal(t, "1.0.3", meta.AgentVersion)
+	assert.Empty(t, meta.Model)
+}

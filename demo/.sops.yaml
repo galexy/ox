@@ -1,0 +1,16 @@
+# SOPS configuration for demo secrets
+#
+# Uses same age key as sageox-mono for consistency.
+#
+# Setup:
+#   1. Get private key from 1Password (search "SageOx SOPS Age Key")
+#   2. Save to ~/.config/sops/age/keys.txt
+#   3. chmod 600 ~/.config/sops/age/keys.txt
+#
+# Usage:
+#   Decrypt: sops -d credentials.sops.yaml
+#   Edit: sops credentials.sops.yaml
+
+creation_rules:
+  - path_regex: .*\.sops\.yaml$
+    age: age1wuz203ect95vc29wrt8myk90qwljkt9vga7kg9j2tjhstmk5quzsyyrx58

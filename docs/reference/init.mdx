@@ -1,0 +1,58 @@
+---
+title: "ox init"
+description: "CLI reference for ox init"
+sidebar_position: 22
+---
+
+## ox init
+
+Initialize SageOx for this repository
+
+### Synopsis
+
+Initialize SageOx for this repository.
+
+The goal of ox init is to:
+  a) Insert SageOx into a repository (local setup)
+  b) Associate that repository with a team (cloud registration)
+
+Requires authentication. Run 'ox login' first.
+
+This command will:
+1. Create .sageox/ directory with config, README, and .gitignore
+2. Generate repository ID and fingerprint
+3. Create .sageox/.repo_<uuid> marker file
+4. Inject 'ox agent prime' into AGENTS.md/CLAUDE.md
+5. Install agent hooks and slash commands
+6. Stage the created files in git
+7. Associate the repo with your team (prompts if multiple teams)
+8. Register repository with SageOx API
+
+Use --team to specify a team ID directly, or let ox init prompt you.
+
+```
+ox init [flags]
+```
+
+### Options
+
+```
+  -h, --help          help for init
+  -q, --quiet         suppress non-essential output (default: false)
+      --team string   team ID to associate this repo with
+```
+
+### Options inherited from parent commands
+
+```
+  -c, --config string    config file path (default: .sageox/config.yaml)
+      --json             output in JSON format (default: false)
+      --no-interactive   disable spinners and TUI elements (auto-enabled when CI=true)
+      --profile          generate CPU profile and execution trace for performance analysis (default: false)
+  -v, --verbose          enable verbose output (default: false)
+```
+
+### SEE ALSO
+
+* [ox](/)	 - Shared team context that makes agentic engineering multiplayer
+

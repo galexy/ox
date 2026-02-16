@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Mock Claude Code for demo recording.
+# Supports two personas:
+#   1. Ryan: starts a session with /ox-session-start
+#   2. Ajit: asks about team discussions
+#
+# Which persona is used depends on how many times this script has been
+# invoked (tracked via a temp counter file).
+#
+# Usage: Add demo/mock/ to PATH before running demo.tape
+
+# Colors
+RUST='\033[38;2;199;122;80m'     # warm rust (Claude Code border)
+RB='\033[1;38;2;199;122;80m'     # rust bold
+GOLD='\033[38;2;224;165;106m'    # copper gold
+GB='\033[1;38;2;224;165;106m'    # gold bold
+DM='\033[38;2;143;153;163m'      # dim gray
+B='\033[1m'                       # bold
+IT='\033[3m'                      # italic
+R='\033[0m'                       # reset
+SAGE='\033[38;2;122;143;120m'    # sage green
+
+# Ignore CLI flags (e.g. --dangerously-skip-permissions)
+while [[ "${1:-}" == --* ]]; do shift; done
+
+C="$RUST"
+
+# Track invocation count to switch persona
+COUNTER_FILE="/tmp/sageox-demo-claude-count"
+COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
+COUNT=$((COUNT + 1))
+echo "$COUNT" > "$COUNTER_FILE"
+
+if [ "$COUNT" -le 1 ]; then
+    # === PERSONA 1: Ryan ===
+
+    echo ""
+    printf "${C}┌─${RB} Claude Code v2.1.42 ${C}────────────────────────────────────────┬─────────────────────────────┐${R}\n"
+    printf "${C}│${R}                                                              ${C}│${R} ${GB}Tips for getting started${R}    ${C}│${R}\n"
+    printf "${C}│${R}              ${B}Welcome back Ryan!${R}                              ${C}│${R} Run /init to create a       ${C}│${R}\n"
+    printf "${C}│${R}                                                              ${C}│${R} CLAUDE.md fil...            ${C}│${R}\n"
+    printf "${C}│${R}                     🐮                                       ${C}│${R}${C}─────────────────────────────${R}${C}│${R}\n"
+    printf "${C}│${R}                                                              ${C}│${R} ${GB}Recent activity${R}             ${C}│${R}\n"
+    printf "${C}│${R}  ${DM}Opus 5.0 · Claude Max · ryan@sageox.ai's${R}                    ${C}│${R} ${DM}No recent activity${R}          ${C}│${R}\n"
+    printf "${C}│${R}  ${DM}Organization${R}                                                ${C}│${R}                             ${C}│${R}\n"
+    printf "${C}│${R}                ${DM}/Users/ryan/code/myproject${R}                    ${C}│${R}                             ${C}│${R}\n"
+    printf "${C}└──────────────────────────────────────────────────────────────┴─────────────────────────────┘${R}\n"
+    echo ""
+
+    # Prompt — expect /ox-session-start
+    printf " ${RUST}❯${R} "
+    read -r input
+
+    echo ""
+    sleep 1
+
+    # Show session start confirmation
+    printf "${SAGE}✓${R} ${B}Session recording started${R}\n"
+    echo ""
+    printf "  Recording to: ${DM}2026-02-16T11-30-ryan-Oxa7b3.jsonl${R}\n"
+    printf "  Agent:        ${DM}claude-code${R}\n"
+    echo ""
+    printf "  ${DM}Your conversation will be captured and shared with your team.${R}\n"
+    printf "  ${DM}Run${R} ${GOLD}/ox-session-stop${R} ${DM}when done.${R}\n"
+    echo ""
+
+    # Wait for /exit
+    printf " ${RUST}❯${R} "
+    read -r input 2>/dev/null || sleep 30
+
+else
+    # === PERSONA 2: Ajit ===
+
+    echo ""
+    printf "${C}┌─${RB} Claude Code v2.1.42 ${C}────────────────────────────────────────┬─────────────────────────────┐${R}\n"
+    printf "${C}│${R}                                                              ${C}│${R} ${GB}Tips for getting started${R}    ${C}│${R}\n"
+    printf "${C}│${R}              ${B}Welcome back Ajit!${R}                              ${C}│${R} Run /init to create a       ${C}│${R}\n"
+    printf "${C}│${R}                                                              ${C}│${R} CLAUDE.md fil...            ${C}│${R}\n"
+    printf "${C}│${R}                     🐮                                       ${C}│${R}${C}─────────────────────────────${R}${C}│${R}\n"
+    printf "${C}│${R}                                                              ${C}│${R} ${GB}Recent activity${R}             ${C}│${R}\n"
+    printf "${C}│${R}  ${DM}Opus 5.0 · Claude Max · ajit@sageox.ai's${R}                    ${C}│${R} ${DM}No recent activity${R}          ${C}│${R}\n"
+    printf "${C}│${R}  ${DM}Organization${R}                                                ${C}│${R}                             ${C}│${R}\n"
+    printf "${C}│${R}                ${DM}/Users/ajit/code/myproject${R}                    ${C}│${R}                             ${C}│${R}\n"
+    printf "${C}└──────────────────────────────────────────────────────────────┴─────────────────────────────┘${R}\n"
+    echo ""
+
+    # Prompt — Ajit's question
+    printf " ${RUST}❯${R} "
+    read -r question
+
+    echo ""
+    sleep 2
+
+    # Show Claude's response about team context
+    printf "The ${GB}\"First Prod Walk of 2/11/26\"${R} team has the most discussions,\n"
+    printf "including one from ${B}rsnodgrass${R}. Let me look at the discussions to\n"
+    printf "find the conversation between you and Ryan.\n"
+    echo ""
+
+    # Wait for the recording to end
+    printf " ${RUST}❯${R} "
+    read -r input 2>/dev/null || sleep 30
+
+    # Reset counter for next demo run
+    rm -f "$COUNTER_FILE"
+fi

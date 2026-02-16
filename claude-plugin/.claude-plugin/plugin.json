@@ -1,0 +1,45 @@
+{
+  "name": "ox",
+  "description": "Team context, session recording, and AI coworker coordination for collaborative development",
+  "version": "0.17.0",
+  "author": {
+    "name": "SageOx",
+    "email": "hi@sageox.ai"
+  },
+  "homepage": "https://sageox.ai",
+  "repository": "https://github.com/sageox/ox",
+  "license": "MIT",
+  "keywords": [
+    "team-context",
+    "session-recording",
+    "ai-coworker",
+    "ledger",
+    "collaboration",
+    "conventions",
+    "onboarding"
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v ox >/dev/null 2>&1; then ox agent prime 2>&1 || true; else echo 'SageOx ox CLI is not installed. Visit https://sageox.ai/install to set up.'; fi"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v ox >/dev/null 2>&1; then ox agent prime 2>&1 || true; else echo 'SageOx ox CLI is not installed. Visit https://sageox.ai/install to set up.'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

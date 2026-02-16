@@ -1,0 +1,18 @@
+{
+  "name": "sageox",
+  "owner": {
+    "name": "SageOx",
+    "email": "hi@sageox.ai"
+  },
+  "metadata": {
+    "description": "SageOx AI coworker tools for team context, session recording, and collaborative development"
+  },
+  "plugins": [
+    {
+      "name": "ox",
+      "source": "./claude-plugin",
+      "description": "Team context, session recording, and AI coworker coordination for collaborative development",
+      "version": "0.17.0"
+    }
+  ]
+}
