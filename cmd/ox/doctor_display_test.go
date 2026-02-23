@@ -118,6 +118,50 @@ func TestDisplayDoctorResults_AllPassed(t *testing.T) {
 	assert.Contains(t, output, "0 failed", "output missing fail count")
 }
 
+// TestDisplayPrioritySummary_HealthyMessage verifies the "All checks passed"
+// confirmation appears only when there are no failures and no warnings.
+func TestDisplayPrioritySummary_HealthyMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		checks     []checkResult
+		wantHealthy bool
+	}{
+		{
+			name:        "all passed shows healthy",
+			checks:      []checkResult{PassedCheck("check1", "ok"), PassedCheck("check2", "ok")},
+			wantHealthy: true,
+		},
+		{
+			name:        "warnings suppress healthy message",
+			checks:      []checkResult{PassedCheck("check1", "ok"), WarningCheck("check2", "issue", "")},
+			wantHealthy: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			categories := []checkCategory{{name: "Test", checks: tt.checks}}
+
+			cmd := &cobra.Command{}
+			buf := new(bytes.Buffer)
+			cmd.SetOut(buf)
+
+			// non-verbose mode exercises displayPrioritySummary
+			displayDoctorResults(cmd, categories, doctorOptions{})
+
+			output := buf.String()
+			if tt.wantHealthy {
+				assert.Contains(t, output, "All checks passed")
+			} else {
+				assert.NotContains(t, output, "All checks passed")
+			}
+		})
+	}
+}
+
 // TestDisplayDoctorResults_HasFailures returns true when any check failed
 func TestDisplayDoctorResults_HasFailures(t *testing.T) {
 	t.Parallel()
