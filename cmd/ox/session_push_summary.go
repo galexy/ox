@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sageox/ox/internal/lfs"
 	"github.com/sageox/ox/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -110,11 +111,29 @@ func pushSummaryToLedger(filePath, sessionDir string) *pushSummaryOutput {
 		}
 	}
 
+	// update meta.json summary with the AI-generated title from summary.json
+	metaUpdated := false
+	var summaryObj struct {
+		Title   string `json:"title"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(data, &summaryObj); err == nil && summaryObj.Title != "" {
+		if err := lfs.UpdateMetaSummary(sessionDir, summaryObj.Title); err != nil {
+			slog.Debug("update meta.json summary", "error", err)
+		} else {
+			metaUpdated = true
+		}
+	}
+
 	// extract session name from session dir path for commit message
 	sessionName := filepath.Base(sessionDir)
 
-	// git add the summary file
-	addCmd := exec.Command("git", "-C", ledgerPath, "add", summaryDst)
+	// git add the summary file (and meta.json if updated)
+	addArgs := []string{"-C", ledgerPath, "add", summaryDst}
+	if metaUpdated {
+		addArgs = append(addArgs, filepath.Join(sessionDir, "meta.json"))
+	}
+	addCmd := exec.Command("git", addArgs...)
 	if output, err := addCmd.CombinedOutput(); err != nil {
 		return &pushSummaryOutput{
 			Success: false,

@@ -89,3 +89,69 @@ func TestExtractTopicHint_Empty(t *testing.T) {
 	assert.Equal(t, "", extractTopicHint("   "))
 	assert.Equal(t, "", extractTopicHint("# Header Only\n"))
 }
+
+func TestLocalSummary_SkillInvocations(t *testing.T) {
+	tests := []struct {
+		name           string
+		entries        []Entry
+		wantPrefix     string
+		wantContains   []string
+		wantNotContain []string
+	}{
+		{
+			name: "skips skill invocation uses second user message",
+			entries: []Entry{
+				{Type: EntryTypeUser, Content: "/ox-session-start"},
+				{Type: EntryTypeUser, Content: "Fix the authentication bug in the login flow"},
+				{Type: EntryTypeAssistant, Content: "I'll fix that."},
+			},
+			wantPrefix:     "Fix the authentication bug",
+			wantNotContain: []string{"/ox-session-start"},
+		},
+		{
+			name: "all skill invocations produces stats only",
+			entries: []Entry{
+				{Type: EntryTypeUser, Content: "/ox-session-start"},
+				{Type: EntryTypeUser, Content: "/commit"},
+				{Type: EntryTypeAssistant, Content: "Done."},
+			},
+			wantContains:   []string{"2 user messages"},
+			wantNotContain: []string{"/ox-session-start", "/commit"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := LocalSummary(tt.entries)
+			if tt.wantPrefix != "" {
+				assert.True(t, strings.HasPrefix(result, tt.wantPrefix), "got: %s", result)
+			}
+			for _, s := range tt.wantContains {
+				assert.Contains(t, result, s)
+			}
+			for _, s := range tt.wantNotContain {
+				assert.NotContains(t, result, s)
+			}
+		})
+	}
+}
+
+func TestIsSkillInvocation(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"/ox-session-start", true},
+		{"/commit", true},
+		{"/ox-session-stop", true},
+		{"Fix the bug", false},
+		{"Add a /path to the config", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, isSkillInvocation(tt.input))
+		})
+	}
+}
