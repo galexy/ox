@@ -89,6 +89,7 @@ func getLatestGitHubRelease() (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	// only User-Agent for external API; no X-Orchestrator
 	req.Header.Set("User-Agent", useragent.String())
 
 	logger.LogHTTPRequest("GET", url)
