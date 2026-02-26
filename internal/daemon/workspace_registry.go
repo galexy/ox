@@ -75,8 +75,9 @@ type WorkspaceRegistry struct {
 	// project context
 	projectRoot string
 	repoName    string
-	endpoint    string // SageOx API endpoint from project config
-	repoID      string // repo ID from project config (for API calls)
+	endpoint      string // SageOx API endpoint from project config
+	repoID        string // repo ID from project config (for API calls)
+	projectTeamID string // primary team ID from project config
 
 	// workspaces indexed by ID
 	workspaces map[string]*WorkspaceState
@@ -133,6 +134,9 @@ func (r *WorkspaceRegistry) loadFromConfigLocked() error {
 			}
 			if r.repoID == "" {
 				r.repoID = projectCfg.RepoID
+			}
+			if r.projectTeamID == "" {
+				r.projectTeamID = projectCfg.TeamID
 			}
 		} else if err != nil {
 			slog.Debug("workspace registry: failed to load project config",
@@ -525,6 +529,13 @@ func (r *WorkspaceRegistry) PersistLedgerPath(path string) error {
 	}
 	slog.Info("persisted ledger path to config.local.toml", "path", path)
 	return nil
+}
+
+// ProjectTeamID returns the project's primary team ID.
+func (r *WorkspaceRegistry) ProjectTeamID() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.projectTeamID
 }
 
 // GetLedgerPath returns the ledger path for quick access.
