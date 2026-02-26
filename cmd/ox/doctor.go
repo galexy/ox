@@ -269,6 +269,16 @@ common issues, or --fix-slug to target specific checks.`,
 			_ = doctor.ClearNeedsDoctorHuman(gitRoot)
 		}
 
+		// set or clear .needs-doctor-agent marker based on whether any check
+		// requires agent intervention (e.g., incomplete sessions)
+		if gitRoot != "" {
+			if hasRequiresAgentIssues(categories) {
+				_ = doctor.SetNeedsDoctorAgent(gitRoot)
+			} else {
+				_ = doctor.ClearNeedsDoctorAgent(gitRoot)
+			}
+		}
+
 		// show contextual tip before returning
 		userCfg, _ := config.LoadUserConfig("")
 		tips.MaybeShow("doctor", tips.RandomChance, cfg.Quiet, !userCfg.AreTipsEnabled(), cfg.JSON)
@@ -1471,4 +1481,22 @@ func recordDoctorRun(fix bool) {
 	}
 
 	_ = config.SaveHealth(gitRoot, health)
+}
+
+// hasRequiresAgentIssues scans doctor results for any non-passing checks
+// that require agent intervention (e.g., incomplete sessions needing LLM summarization).
+func hasRequiresAgentIssues(categories []checkCategory) bool {
+	for _, cat := range categories {
+		for _, check := range cat.checks {
+			if check.requiresAgent && !check.skipped && (!check.passed || check.warning) {
+				return true
+			}
+			for _, child := range check.children {
+				if child.requiresAgent && !child.skipped && (!child.passed || child.warning) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
