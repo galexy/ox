@@ -36,7 +36,8 @@ var daemonStartCmd = &cobra.Command{
 
 		// check if already running
 		if daemon.IsRunning() {
-			fmt.Println("Daemon is already running")
+			cli.PrintInfo("Daemon is already running")
+			cli.PrintHint("  Run 'ox daemon status' to see details")
 			return nil
 		}
 
@@ -111,12 +112,7 @@ var daemonRestartCmd = &cobra.Command{
 		}
 
 		// start in background
-		if err := startDaemonBackground(ledgerPath); err != nil {
-			return err
-		}
-
-		fmt.Println("Daemon restarted")
-		return nil
+		return startDaemonBackground(ledgerPath)
 	},
 }
 
@@ -128,10 +124,18 @@ var daemonStatusCmd = &cobra.Command{
 		verbose, _ := cmd.Flags().GetBool("verbose")
 
 		if !daemon.IsRunning() {
-			if jsonOutput {
-				fmt.Println(`{"running": false}`)
+			if daemon.IsStarting() {
+				if jsonOutput {
+					fmt.Println(`{"running": false, "starting": true}`)
+				} else {
+					fmt.Print(daemon.FormatStarting())
+				}
 			} else {
-				fmt.Print(daemon.FormatNotRunning(config.IsInitializedInCwd()))
+				if jsonOutput {
+					fmt.Println(`{"running": false}`)
+				} else {
+					fmt.Print(daemon.FormatNotRunning(config.IsInitializedInCwd()))
+				}
 			}
 			return nil
 		}
@@ -313,7 +317,21 @@ func startDaemonBackground(ledgerPath string) error {
 	logFile.Close()
 
 	cli.PrintSuccess(fmt.Sprintf("Daemon started (pid %d)", cmd.Process.Pid))
-	cli.PrintHint(fmt.Sprintf("  Logs: %s", shortenPath(logPath)))
-	cli.PrintHint("  Status: ox daemon status")
+
+	// brief readiness poll (up to 2s) to confirm daemon is accepting IPC
+	ready := false
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if daemon.IsRunning() {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		cli.PrintHint("  May be delayed due to recent restarts")
+	}
+
+	cli.PrintHint(fmt.Sprintf("  Logs: %s", logPath))
+	cli.PrintHint("  Run 'ox daemon status' to see details")
 	return nil
 }
