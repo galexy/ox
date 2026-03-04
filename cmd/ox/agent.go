@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sageox/ox/internal/agentinstance"
+	"github.com/sageox/ox/internal/config"
 	"github.com/sageox/ox/internal/daemon"
 	"github.com/sageox/ox/internal/repotools"
 	"github.com/spf13/cobra"
@@ -257,8 +258,13 @@ func resolveInstance(agentID string) (*agentinstance.Instance, error) {
 	return inst, nil
 }
 
-// findProjectRoot walks up from cwd looking for .sageox directory
+// findProjectRoot walks up from cwd looking for .sageox directory.
+// OX_PROJECT_ROOT env var overrides discovery when set to a valid initialized project.
 func findProjectRoot() (string, error) {
+	if resolved := config.ResolveProjectRootOverride(); resolved != "" {
+		return resolved, nil
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err

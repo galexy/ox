@@ -235,9 +235,23 @@ func (c *UserConfig) GetViewFormat() string {
 	return c.ViewFormat
 }
 
-// LoadUserConfig loads user configuration from the specified config directory.
+// LoadUserConfig loads user configuration using standard path discovery.
+// Checks OX_USER_CONFIG env var first, then XDG/default paths.
+//
+// For tests that need to load from an explicit directory, use LoadUserConfigFrom.
+func LoadUserConfig() (*UserConfig, error) {
+	// OX_USER_CONFIG overrides all path discovery — for CI/ephemeral environments
+	if envPath := os.Getenv(EnvUserConfig); envPath != "" {
+		return loadUserConfigFromFile(envPath)
+	}
+
+	return LoadUserConfigFrom("")
+}
+
+// LoadUserConfigFrom loads user configuration from the specified config directory.
 // If configDir is empty, uses GetUserConfigDir() which respects XDG_CONFIG_HOME.
-func LoadUserConfig(configDir string) (*UserConfig, error) {
+// This is primarily for tests that need to point at a temp directory.
+func LoadUserConfigFrom(configDir string) (*UserConfig, error) {
 	if configDir == "" {
 		configDir = GetUserConfigDir()
 		if configDir == "" {
@@ -258,6 +272,24 @@ func LoadUserConfig(configDir string) (*UserConfig, error) {
 	var cfg UserConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return &UserConfig{}, fmt.Errorf("parsing config: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// loadUserConfigFromFile loads user config from an explicit file path.
+func loadUserConfigFromFile(path string) (*UserConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &UserConfig{}, nil
+		}
+		return &UserConfig{}, fmt.Errorf("reading config from OX_USER_CONFIG=%s: %w", path, err)
+	}
+
+	var cfg UserConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return &UserConfig{}, fmt.Errorf("parsing config from OX_USER_CONFIG=%s: %w", path, err)
 	}
 
 	return &cfg, nil
@@ -316,7 +348,7 @@ func SaveUserConfig(cfg *UserConfig) error {
 // This is a convenience function for use without loading the full config.
 // Default: true
 func GetContextGitAutoCommit() bool {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		return true
 	}
@@ -327,7 +359,7 @@ func GetContextGitAutoCommit() bool {
 // This is a convenience function for use without loading the full config.
 // Default: false
 func GetContextGitAutoPush() bool {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		return false
 	}
@@ -337,7 +369,7 @@ func GetContextGitAutoPush() bool {
 // SetContextGitAutoCommit loads user config, sets auto-commit, and saves.
 // This is a convenience function for setting a single value.
 func SetContextGitAutoCommit(value bool) error {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		cfg = &UserConfig{}
 	}
@@ -348,7 +380,7 @@ func SetContextGitAutoCommit(value bool) error {
 // SetContextGitAutoPush loads user config, sets auto-push, and saves.
 // This is a convenience function for setting a single value.
 func SetContextGitAutoPush(value bool) error {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		cfg = &UserConfig{}
 	}
@@ -360,7 +392,7 @@ func SetContextGitAutoPush(value bool) error {
 // This is a convenience function for use without loading the full config.
 // Default: false
 func AreSessionsEnabled() bool {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		return false
 	}
@@ -370,7 +402,7 @@ func AreSessionsEnabled() bool {
 // SetSessionsEnabled loads user config, sets sessions.enabled, and saves.
 // This is a convenience function for setting a single value.
 func SetSessionsEnabled(value bool) error {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		cfg = &UserConfig{}
 	}
@@ -381,7 +413,7 @@ func SetSessionsEnabled(value bool) error {
 // GetDisplayName loads user config and returns the display_name setting.
 // Returns "" if not set.
 func GetDisplayName() string {
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		return ""
 	}
@@ -394,7 +426,7 @@ func SetDisplayName(name string) error {
 	if err := ValidateDisplayName(name); err != nil {
 		return err
 	}
-	cfg, err := LoadUserConfig("")
+	cfg, err := LoadUserConfig()
 	if err != nil {
 		cfg = &UserConfig{}
 	}
