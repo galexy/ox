@@ -14,12 +14,19 @@ import (
 var queryCmd = &cobra.Command{
 	Use:   "query",
 	Short: "Search team knowledge",
-	Long: `Search across team discussions, docs, and session history.
+	Long: `Search across team discussions, docs, session history, and local code.
+
+Sources:
+  team      Search team discussions, docs, and session history (default)
+  code      Search local code index only (queries)
+  all       Search both team context and local code index
 
 Examples:
   ox query "how do we handle authentication?"
   ox query "database migration patterns" --limit 10
-  ox query "deployment process" --team team_abc123`,
+  ox query "deployment process" --team team_abc123
+  ox query "error handling" --source=code
+  ox query "auth flow" --source=all`,
 	Args: cobra.ExactArgs(1),
 	RunE: runQuery,
 }
@@ -29,7 +36,7 @@ func init() {
 	queryCmd.Flags().String("team", "", "team ID to search (default: from project config)")
 	queryCmd.Flags().String("repo", "", "repo ID to search (default: from project config)")
 	queryCmd.Flags().String("mode", "hybrid", "search mode: hybrid, knn, or bm25")
-	queryCmd.Flags().String("source", "all", "search source: all, teamctx, or code")
+	queryCmd.Flags().String("source", "team", "search source: team (default), code, all")
 }
 
 // runQuery handles the top-level `ox query "search text"` command.
@@ -55,6 +62,11 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		source: source,
 	}
 
+	// normalize teamctx alias
+	if qa.source == "teamctx" {
+		qa.source = "team"
+	}
+
 	switch qa.mode {
 	case "hybrid", "knn", "bm25":
 		// ok
@@ -63,10 +75,10 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	switch qa.source {
-	case "all", "teamctx", "code":
+	case "all", "team", "code":
 		// ok
 	default:
-		return fmt.Errorf("invalid source %q: must be all, teamctx, or code", qa.source)
+		return fmt.Errorf("invalid source %q: must be all, team, or code", qa.source)
 	}
 
 	agentID, agentType := detectAgentContext()
