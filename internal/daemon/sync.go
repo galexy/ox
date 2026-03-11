@@ -614,6 +614,15 @@ func (s *SyncScheduler) Start(ctx context.Context) {
 		defer gcTicker.Stop()
 	}
 
+	// memory distillation ticker — spawns `ox distill` as subprocess
+	var distillTicker *time.Ticker
+	var distillChan <-chan time.Time
+	if s.config.DistillInterval > 0 && s.config.ProjectRoot != "" {
+		distillTicker = time.NewTicker(s.config.DistillInterval)
+		distillChan = distillTicker.C
+		defer distillTicker.Stop()
+	}
+
 	// write initial heartbeat
 	s.writeHeartbeats()
 
@@ -653,11 +662,51 @@ func (s *SyncScheduler) Start(ctx context.Context) {
 		case <-gcChan:
 			s.checkAndRunGC(ctx)
 
+		case <-distillChan:
+			s.triggerDistill(ctx)
+
 		case <-s.triggerChan:
 			// triggered by file watcher, do full sync
 			s.syncAll(ctx)
 		}
 	}
+}
+
+// triggerDistill spawns `ox distill` as a subprocess for memory distillation.
+// The daemon only triggers the process; all writes happen in the subprocess.
+func (s *SyncScheduler) triggerDistill(ctx context.Context) {
+	// guard: only distill if FEATURE_MEMORY is enabled
+	if !auth.IsMemoryEnabled() {
+		return
+	}
+
+	// guard: need claude CLI available
+	if _, err := exec.LookPath("claude"); err != nil {
+		s.logger.Debug("distill skipped: claude CLI not in PATH")
+		return
+	}
+
+	s.logger.Info("triggering memory distillation")
+	start := time.Now()
+
+	oxPath, err := os.Executable()
+	if err != nil {
+		oxPath = "ox" // fall back to PATH lookup
+	}
+
+	cmd := exec.CommandContext(ctx, oxPath, "distill")
+	cmd.Dir = s.config.ProjectRoot
+	cmd.Env = append(os.Environ(), "FEATURE_MEMORY=true")
+
+	out, err := cmd.CombinedOutput()
+	duration := time.Since(start)
+
+	if err != nil {
+		s.logger.Warn("distill failed", "error", err, "output", strings.TrimSpace(string(out)), "duration", duration)
+		return
+	}
+
+	s.logger.Info("distill completed", "output", strings.TrimSpace(string(out)), "duration", duration)
 }
 
 // TriggerSync triggers an immediate sync (debounced by watcher).
