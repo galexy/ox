@@ -32,6 +32,12 @@ type Result struct {
 	SymbolKind  string  `json:"symbol_kind,omitempty"`
 	CommentKind string  `json:"comment_kind,omitempty"`
 	CommentText string  `json:"comment_text,omitempty"`
+
+	// PR/issue-specific fields (populated for type:pr and type:issue results)
+	Number int    `json:"number,omitempty"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 // Execute runs a parsed query against the store using the planner to determine
@@ -54,7 +60,7 @@ func Execute(ctx context.Context, s *store.Store, query *ParsedQuery) ([]Result,
 	}
 }
 
-// executePlanSQL executes a plan that only needs SQL (commits, symbols, calls).
+// executePlanSQL executes a plan that only needs SQL (commits, symbols, calls, PRs, issues).
 func executePlanSQL(ctx context.Context, s *store.Store, plan *ExecutionPlan) ([]Result, error) {
 	args := make([]interface{}, len(plan.SQLParams))
 	for i, p := range plan.SQLParams {
@@ -108,6 +114,15 @@ func executePlanSQL(ctx context.Context, s *store.Store, plan *ExecutionPlan) ([
 				r.Content = val
 			case "language":
 				r.Language = val
+			case "number":
+				fmt.Sscanf(val, "%d", &r.Number)
+			case "title":
+				r.Title = val
+				r.Content = val
+			case "state":
+				r.State = val
+			case "url":
+				r.URL = val
 			}
 		}
 		results = append(results, r)

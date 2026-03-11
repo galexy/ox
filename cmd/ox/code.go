@@ -37,39 +37,12 @@ var codeCmd = &cobra.Command{
 	Long:  "Search git history and current code of this repo using queries.",
 }
 
+// codeIndexCmd is an alias for 'ox index code' — kept for back-compat and discoverability
 var codeIndexCmd = &cobra.Command{
 	Use:   "index [url]",
-	Short: "Index a git repository (defaults to current repo)",
+	Short: "Index a git repository (alias for 'ox index code')",
 	Args:  cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// ensure daemon is running — indexing happens in the daemon
-		if err := daemon.EnsureDaemon(); err != nil {
-			return fmt.Errorf("daemon required for indexing: %w", err)
-		}
-
-		payload := daemon.CodeIndexPayload{}
-		if len(args) > 0 {
-			payload.URL = args[0]
-			fmt.Fprintf(os.Stderr, "Indexing %s...\n", args[0])
-		} else {
-			fmt.Fprintf(os.Stderr, "Indexing local repo...\n")
-		}
-
-		client := daemon.NewClientWithTimeout(5 * time.Minute)
-		result, err := client.CodeIndex(payload, func(stage string, percent *int, message string) {
-			if message != "" {
-				fmt.Fprintf(os.Stderr, "  %s\n", message)
-			}
-		})
-		if err != nil {
-			return fmt.Errorf("index: %w", err)
-		}
-
-		fmt.Fprintf(os.Stderr, "Done. Parsed %d blobs, %d symbols, %d comments (%s)\n",
-			result.BlobsParsed, result.SymbolsExtracted, result.CommentsExtracted,
-			formatIndexTiming(result))
-		return nil
-	},
+	RunE:  indexCodeCmd.RunE,
 }
 
 var codeSearchCmd = &cobra.Command{
@@ -136,12 +109,18 @@ var codeSearchCmd = &cobra.Command{
 
 // compactSearchResult is a minimal search result optimized for agent context.
 type compactSearchResult struct {
-	File        string `json:"file"`
+	File        string `json:"file,omitempty"`
 	Line        int    `json:"line,omitempty"`
 	Lang        string `json:"lang,omitempty"`
 	Snippet     string `json:"snippet"`
 	Symbol      string `json:"symbol,omitempty"`
 	CommentKind string `json:"comment_kind,omitempty"`
+
+	// PR/issue fields
+	Number int    `json:"number,omitempty"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 // compactSearchResponse is the default search output — minimal context footprint.
@@ -169,6 +148,10 @@ func compactSearchResults(results []search.Result, limit int) compactSearchRespo
 			Snippet:     snippet,
 			Symbol:      r.SymbolName,
 			CommentKind: r.CommentKind,
+			Number:      r.Number,
+			Title:       r.Title,
+			State:       r.State,
+			URL:         r.URL,
 		}
 		compact = append(compact, cr)
 	}
@@ -300,7 +283,7 @@ var codeStatsCmd = &cobra.Command{
 		}
 
 		// query DB directly for counts (daemon stats may lag)
-		var totalCommits, totalBlobs, totalSymbols, totalComments int
+		var totalCommits, totalBlobs, totalSymbols, totalComments, totalPRs, totalIssues int
 		type repoRow struct {
 			name    string
 			path    string
@@ -316,6 +299,8 @@ var codeStatsCmd = &cobra.Command{
 				_ = db.Store().QueryRow("SELECT COUNT(*) FROM blobs").Scan(&totalBlobs)
 				_ = db.Store().QueryRow("SELECT COUNT(*) FROM symbols").Scan(&totalSymbols)
 				_ = db.Store().QueryRow("SELECT COUNT(*) FROM comments").Scan(&totalComments)
+				_ = db.Store().QueryRow("SELECT COUNT(*) FROM pull_requests").Scan(&totalPRs)
+				_ = db.Store().QueryRow("SELECT COUNT(*) FROM issues").Scan(&totalIssues)
 
 				rows, qErr := db.Store().Query(`
 					SELECT r.name, r.path, COUNT(DISTINCT c.id), COUNT(DISTINCT fr.blob_id)
@@ -349,6 +334,8 @@ var codeStatsCmd = &cobra.Command{
 				Blobs       int              `json:"blobs"`
 				Symbols     int              `json:"symbols"`
 				Comments    int              `json:"comments"`
+				PRs         int              `json:"prs"`
+				Issues      int              `json:"issues"`
 				Repos       []jsonRepoStats  `json:"repos"`
 				DataDir     string           `json:"data_dir"`
 				IndexExists bool             `json:"index_exists"`
@@ -361,6 +348,8 @@ var codeStatsCmd = &cobra.Command{
 				Blobs:       totalBlobs,
 				Symbols:     totalSymbols,
 				Comments:    totalComments,
+				PRs:         totalPRs,
+				Issues:      totalIssues,
 				DataDir:     dataDir,
 				IndexExists: indexExists,
 			}
@@ -456,6 +445,16 @@ var codeStatsCmd = &cobra.Command{
 			b.WriteString("\n")
 		}
 
+		// GitHub data — only show when there's data
+		if totalPRs > 0 || totalIssues > 0 {
+			b.WriteString(statusLabelStyle.Render("PRs"))
+			b.WriteString(statusValueStyle.Render(formatComma(totalPRs)))
+			b.WriteString("\n")
+			b.WriteString(statusLabelStyle.Render("Issues"))
+			b.WriteString(statusValueStyle.Render(formatComma(totalIssues)))
+			b.WriteString("\n")
+		}
+
 		// next check — only when daemon is running and index exists
 		if codeStats != nil && !codeStats.IndexingNow && indexExists && syncInterval > 0 && !codeStats.LastIndexed.IsZero() {
 			nextCheck := codeStats.LastIndexed.Add(syncInterval)
@@ -535,6 +534,9 @@ func init() {
 
 	codeQueryCmd.Flags().Bool("full-json", false, "full uncompacted JSON output (~6x more context tokens)")
 	codeQueryCmd.Flags().Int("limit", 10, "max results to return")
+
+	// mirror indexCodeCmd flags so the alias works correctly
+	codeIndexCmd.Flags().Bool("full", false, "wipe index and rebuild from scratch")
 
 	codeStatsCmd.Flags().Bool("json", false, "output as JSON")
 

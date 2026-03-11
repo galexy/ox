@@ -27,6 +27,7 @@ import (
 // be needed.
 type CodeDBManager struct {
 	projectRoot string
+	ledgerPath  string // path to ledger checkout; empty if no ledger exists
 	logger      *slog.Logger
 	telemetry   *TelemetryCollector
 
@@ -43,6 +44,8 @@ type CodeDBStats struct {
 	Blobs       int       `json:"blobs"`
 	Symbols     int       `json:"symbols"`
 	Comments    int       `json:"comments"`
+	PRs         int       `json:"prs"`
+	Issues      int       `json:"issues"`
 	Repos       []RepoStats `json:"repos,omitempty"`
 	LastIndexed time.Time `json:"last_indexed,omitempty"`
 	IndexingNow bool      `json:"indexing_now"`
@@ -63,6 +66,8 @@ type RepoStats struct {
 type CodeIndexPayload struct {
 	// URL is an optional remote git URL to index. If empty, indexes the local repo.
 	URL string `json:"url,omitempty"`
+	// Full wipes the existing index before rebuilding. Used by 'ox index --full'.
+	Full bool `json:"full,omitempty"`
 }
 
 // CodeIndexResult is the result of a code_index operation.
@@ -102,6 +107,14 @@ func (m *CodeDBManager) resolveSharedDataDir() string {
 	return paths.CodeDBDataDir(m.projectRoot)
 }
 
+// SetLedgerPath sets the ledger checkout path for GitHub data indexing.
+// Called by the daemon when the ledger workspace is discovered.
+func (m *CodeDBManager) SetLedgerPath(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ledgerPath = path
+}
+
 // Index runs indexing with progress reporting. Only one indexing operation runs at a time.
 // If indexing is already in progress, returns an error immediately.
 //
@@ -128,6 +141,14 @@ func (m *CodeDBManager) Index(ctx context.Context, payload CodeIndexPayload, pw 
 	}()
 
 	dataDir := m.resolveSharedDataDir()
+
+	// --full: wipe existing index so we rebuild from scratch
+	if payload.Full {
+		m.logger.Info("codedb full reindex requested, wiping existing index", "path", dataDir)
+		if err := os.RemoveAll(dataDir); err != nil {
+			return nil, fmt.Errorf("wipe codedb for full reindex: %w", err)
+		}
+	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create codedb dir: %w", err)
 	}
@@ -217,6 +238,28 @@ func (m *CodeDBManager) Index(ctx context.Context, payload CodeIndexPayload, pw 
 		dirtyDuration = time.Since(dirtyStart)
 	}
 	totalDuration := time.Since(totalStart)
+
+	// index GitHub data from ledger (PRs, issues)
+	m.mu.Lock()
+	lp := m.ledgerPath
+	m.mu.Unlock()
+
+	if lp != "" {
+		if pw != nil {
+			_ = pw.WriteStage("github", "Indexing GitHub data from ledger...")
+		}
+		ghStats, ghErr := db.IndexGitHubData(ctx, lp, func(msg string) {
+			if pw != nil {
+				_ = pw.WriteMessage(msg)
+			}
+		})
+		if ghErr != nil {
+			m.logger.Warn("github data indexing failed", "error", ghErr)
+			// non-fatal: don't fail the whole index for GitHub data
+		} else if ghStats.PRsIndexed > 0 || ghStats.IssuesIndexed > 0 {
+			m.logger.Info("github data indexed", "prs", ghStats.PRsIndexed, "issues", ghStats.IssuesIndexed)
+		}
+	}
 
 	m.mu.Lock()
 	m.lastIndex = time.Now()
@@ -314,6 +357,8 @@ func (m *CodeDBManager) Stats() CodeDBStats {
 			_ = db.Store().QueryRow("SELECT COUNT(*) FROM blobs").Scan(&stats.Blobs)
 			_ = db.Store().QueryRow("SELECT COUNT(*) FROM symbols").Scan(&stats.Symbols)
 			_ = db.Store().QueryRow("SELECT COUNT(*) FROM comments").Scan(&stats.Comments)
+			_ = db.Store().QueryRow("SELECT COUNT(*) FROM pull_requests").Scan(&stats.PRs)
+			_ = db.Store().QueryRow("SELECT COUNT(*) FROM issues").Scan(&stats.Issues)
 
 			// per-repo breakdown
 			rows, err := db.Store().Query(`
