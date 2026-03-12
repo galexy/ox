@@ -41,7 +41,7 @@ var distillCmd = &cobra.Command{
 	Long: `Distill accumulated observations into structured memory files.
 
 Collects pending observations from the team context, invokes the local
-AI agent CLI (claude) for LLM-powered summarization, and writes the
+AI coworker CLI (claude) for LLM-powered summarization, and writes the
 results back as memory files in the team context repo.
 
 Memory files are organized by temporal layers:
@@ -53,7 +53,7 @@ Memory files are organized by temporal layers:
 
 func init() {
 	distillCmd.Flags().StringVar(&distillLayer, "layer", "", "distill only a specific layer (daily, weekly, monthly)")
-	distillCmd.Flags().BoolVar(&distillDryRun, "dry-run", false, "show what would be distilled without invoking the AI agent")
+	distillCmd.Flags().BoolVar(&distillDryRun, "dry-run", false, "show what would be distilled without invoking the AI coworker")
 
 	if auth.IsMemoryEnabled() {
 		rootCmd.AddCommand(distillCmd)
@@ -127,10 +127,10 @@ func runDistill(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no team context configured — run 'ox init' first")
 	}
 
-	// detect AI agent CLI
+	// detect AI coworker CLI
 	backend, err := agentcli.Detect()
 	if err != nil && !distillDryRun {
-		return fmt.Errorf("distillation requires an AI agent CLI: %w", err)
+		return fmt.Errorf("distillation requires an AI coworker CLI: %w", err)
 	}
 
 	// load distill state (v2 format, backward compat with v1)
@@ -247,7 +247,7 @@ func distillDaily(ctx context.Context, cmd *cobra.Command, backend agentcli.Back
 
 	output, err := backend.Run(ctx, prompt)
 	if err != nil {
-		return fmt.Errorf("AI agent: %w", err)
+		return fmt.Errorf("AI coworker: %w", err)
 	}
 
 	// write daily memory file
@@ -298,7 +298,7 @@ func distillWeekly(ctx context.Context, cmd *cobra.Command, backend agentcli.Bac
 
 	output, err := backend.Run(ctx, prompt)
 	if err != nil {
-		return fmt.Errorf("AI agent: %w", err)
+		return fmt.Errorf("AI coworker: %w", err)
 	}
 
 	filePath := filepath.Join("memory", "weekly", weekID+".md")
@@ -347,7 +347,7 @@ func distillMonthly(ctx context.Context, cmd *cobra.Command, backend agentcli.Ba
 
 	output, err := backend.Run(ctx, prompt)
 	if err != nil {
-		return fmt.Errorf("AI agent: %w", err)
+		return fmt.Errorf("AI coworker: %w", err)
 	}
 
 	filePath := filepath.Join("memory", "monthly", month+".md")

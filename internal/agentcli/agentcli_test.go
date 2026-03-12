@@ -20,7 +20,7 @@ func TestDetectNoBackend(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when no backends available")
 	}
-	if !strings.Contains(err.Error(), "no supported AI agent CLI found") {
+	if !strings.Contains(err.Error(), "no supported AI coworker CLI found") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

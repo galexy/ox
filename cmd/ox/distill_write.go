@@ -76,9 +76,11 @@ func commitMemoryFile(tcPath, relPath, commitMsg string) error {
 	commitCmd := exec.Command("git", "commit", "-m", commitMsg, "--allow-empty-message")
 	commitCmd.Dir = tcPath
 	if out, err := commitCmd.CombinedOutput(); err != nil {
-		// "nothing to commit" is not an error
+		// "nothing to commit" is not an error — but exit code 1 also covers
+		// hook failures, so check the output to distinguish
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 &&
+			strings.Contains(string(out), "nothing to commit") {
 			return nil
 		}
 		return fmt.Errorf("git commit: %s: %w", string(out), err)

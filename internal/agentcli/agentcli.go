@@ -62,5 +62,5 @@ func Detect() (Backend, error) {
 			return b, nil
 		}
 	}
-	return nil, fmt.Errorf("no supported AI agent CLI found (looked for: claude)")
+	return nil, fmt.Errorf("no supported AI coworker CLI found (looked for: claude)")
 }
