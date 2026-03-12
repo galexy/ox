@@ -186,7 +186,8 @@ type teamContextInfo struct {
 	TeamHint      string   `json:"team_hint,omitempty"`      // path to TEAM.md (reference, not inlined)
 	MemoryDaily   []string `json:"memory_daily,omitempty"`   // available daily summary files
 	MemoryWeekly  []string `json:"memory_weekly,omitempty"`  // available weekly summary files
-	MemoryMonthly []string `json:"memory_monthly,omitempty"` // available monthly summary files
+	MemoryMonthly        []string `json:"memory_monthly,omitempty"`         // available monthly summary files
+	ObservationGuideHint string   `json:"observation_guide_hint,omitempty"` // path to memory/GUIDE.md (read when needed)
 
 	// sync health
 	Stale      bool   `json:"stale,omitempty"`       // true if last sync exceeds staleness threshold
@@ -286,6 +287,8 @@ type agentPrimeOutput struct {
 	// Doctor agent marker
 	NeedsDoctorAgent bool   `json:"needs_doctor_agent,omitempty"` // true if .needs-doctor-agent marker exists
 	DoctorHint       string `json:"doctor_hint,omitempty"`        // hint for agent to run ox agent doctor
+	// Observation recording directive (behavioral, not just a tool reference)
+	ObservationDirective string `json:"observation_directive,omitempty"` // proactive instruction to record observations via ox memory put
 	// Code search availability
 	CodeSearchTip string `json:"code_search_tip,omitempty"` // guidance on code search availability for this repo
 	// Hook auto-install
@@ -724,6 +727,14 @@ func runAgentPrime(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// observation directive — behavioral instruction for agents to proactively record
+	if teamCtx != nil && auth.IsMemoryEnabled() && teamCtx.ObservationGuideHint != "" {
+		output.ObservationDirective = fmt.Sprintf(
+			"Proactively record observations throughout this session using `ox memory put`. "+
+				"Record decisions, discoveries, questions, and notable events as they happen — don't wait to be asked. "+
+				"Read GUIDE.md first for what to capture: %s", teamCtx.ObservationGuideHint)
+	}
+
 	// build pre-assembled notification for JSON-consuming agents.
 	// this duplicates the logic in outputAgentPrimeText so JSON consumers
 	// don't have to assemble the notification from individual fields.
@@ -1010,6 +1021,14 @@ func buildGuidance(agentID, projectRoot string, teamCtx *teamContextInfo, ledger
 		cmds = append(cmds, intentCommand{
 			Intent:  fmt.Sprintf("code search %s (not indexed yet): index first, then search code, symbols, and diffs", repoSlug),
 			Command: "ox code index",
+		})
+	}
+
+	// record observations — only when GUIDE.md exists and memory feature is enabled
+	if teamCtx != nil && auth.IsMemoryEnabled() && teamCtx.ObservationGuideHint != "" {
+		cmds = append(cmds, intentCommand{
+			Intent:  "record observation, note decision, capture learning, remember for team — read GUIDE.md first",
+			Command: `ox memory put '{"content": "<observation>"}'`,
 		})
 	}
 
@@ -1875,6 +1894,12 @@ func loadTeamMemory(info *teamContextInfo, teamDir string) {
 		info.TeamHint = teamPath
 	}
 
+	// memory/GUIDE.md — observation guidance reference pointer
+	guidePath := filepath.Join(teamDir, "memory", "GUIDE.md")
+	if _, err := os.Stat(guidePath); err == nil {
+		info.ObservationGuideHint = guidePath
+	}
+
 	// discover memory timeline files for progressive disclosure
 	info.MemoryDaily = discoverMemoryFiles(filepath.Join(teamDir, "memory", "daily"))
 	info.MemoryWeekly = discoverMemoryFiles(filepath.Join(teamDir, "memory", "weekly"))
@@ -1903,7 +1928,8 @@ func emitTeamMemorySection(cmd *cobra.Command, tc *teamContextInfo) {
 		return
 	}
 
-	hasMemory := tc.MemoryContent != "" || tc.SoulHint != "" || tc.TeamHint != "" ||
+	guideEnabled := tc.ObservationGuideHint != "" && auth.IsMemoryEnabled()
+	hasMemory := tc.MemoryContent != "" || tc.SoulHint != "" || tc.TeamHint != "" || guideEnabled ||
 		len(tc.MemoryDaily) > 0 || len(tc.MemoryWeekly) > 0 || len(tc.MemoryMonthly) > 0
 
 	if !hasMemory {
@@ -1926,8 +1952,8 @@ func emitTeamMemorySection(cmd *cobra.Command, tc *teamContextInfo) {
 		fmt.Fprintln(out)
 	}
 
-	// SOUL.md and TEAM.md — reference pointers
-	if tc.SoulHint != "" || tc.TeamHint != "" {
+	// SOUL.md, TEAM.md, GUIDE.md — reference pointers
+	if tc.SoulHint != "" || tc.TeamHint != "" || guideEnabled {
 		fmt.Fprintln(out, "### Available Context")
 		if tc.SoulHint != "" {
 			fmt.Fprintf(out, "- SOUL.md: %s (team identity and values — read when needed)\n", tc.SoulHint)
@@ -1935,6 +1961,18 @@ func emitTeamMemorySection(cmd *cobra.Command, tc *teamContextInfo) {
 		if tc.TeamHint != "" {
 			fmt.Fprintf(out, "- TEAM.md: %s (team members and patterns — read when needed)\n", tc.TeamHint)
 		}
+		if guideEnabled {
+			fmt.Fprintf(out, "- GUIDE.md: %s (observation guidance — read before using 'ox memory put')\n", tc.ObservationGuideHint)
+		}
+		fmt.Fprintln(out)
+	}
+
+	// observation recording — behavioral directive (not just a tool reference)
+	if guideEnabled {
+		fmt.Fprintln(out, "### Observation Recording (Active)")
+		fmt.Fprintln(out, "Proactively record observations throughout this session using `ox memory put`.")
+		fmt.Fprintln(out, "Record decisions, discoveries, questions, and notable events as they happen — don't wait to be asked.")
+		fmt.Fprintf(out, "Read GUIDE.md first for what to capture: %s\n", tc.ObservationGuideHint)
 		fmt.Fprintln(out)
 	}
 
