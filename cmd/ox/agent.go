@@ -216,6 +216,12 @@ func runWithAgentID(cmd *cobra.Command, agentID string, args []string) error {
 		Heartbeat(gitRoot, nil, agentID)
 	}
 
+	// check for team context change notifications (non-blocking, ~50ms max)
+	// controlled by user config: `ox config set notifications on` (default: off)
+	if userCfg, _ := config.LoadUserConfig(); userCfg != nil && userCfg.Notifications.AreNotificationsEnabled() {
+		emitTeamContextNotifications(agentID)
+	}
+
 	subcommand := args[0]
 
 	// reset context byte counter; deferred heartbeat sends accumulated bytes
@@ -551,6 +557,31 @@ func runAgentList(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// emitTeamContextNotifications checks daemon for pending team context changes.
+// Non-blocking: if daemon is unavailable, silently returns.
+// Called on every ox agent <id> <command> invocation via runWithAgentID().
+func emitTeamContextNotifications(agentID string) {
+	client := daemon.NewClient() // 50ms timeout
+	notifs, err := client.Notifications(agentID)
+	if err != nil || notifs == nil {
+		return
+	}
+
+	if len(notifs.Files) == 0 && !notifs.Stale {
+		return
+	}
+
+	if notifs.Stale {
+		fmt.Fprintln(os.Stderr, "NOTICE: Team context changed significantly. Re-read via `ox agent team-ctx` if relevant to current work.")
+		return
+	}
+
+	fmt.Fprintln(os.Stderr, "NOTICE: Team context updated. Re-read only if relevant to current work:")
+	for _, f := range notifs.Files {
+		fmt.Fprintf(os.Stderr, "  %s\n", f.Path)
+	}
 }
 
 // emitDaemonIssueWarnings checks for daemon issues and emits warnings to stderr.
