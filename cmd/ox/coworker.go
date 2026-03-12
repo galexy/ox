@@ -322,8 +322,9 @@ func runCoworkerLoad(cmd *cobra.Command, args []string) error {
 		model = modelOverride
 	}
 
-	// log to session if recording
-	logCoworkerLoad(projectRoot, name, model)
+	// log to session if recording — use caller's agent ID for multi-agent isolation
+	callerAgentID := os.Getenv("SAGEOX_AGENT_ID")
+	logCoworkerLoad(projectRoot, callerAgentID, name, model)
 
 	// track coworker load via telemetry
 	trackCoworkerLoad(name, model, foundTeam.TeamID)
@@ -474,12 +475,16 @@ func runCoworkerRemove(cmd *cobra.Command, args []string) error {
 }
 
 // logCoworkerLoad writes a coworker load entry to the session if recording.
-func logCoworkerLoad(projectRoot, name, model string) {
-	if !session.IsRecording(projectRoot) {
+func logCoworkerLoad(projectRoot, agentID, name, model string) {
+	// per-agent lookup to avoid writing to wrong agent's session in multi-agent repos
+	if agentID == "" {
+		return
+	}
+	if !session.IsRecordingForAgent(projectRoot, agentID) {
 		return
 	}
 
-	state, err := session.LoadRecordingState(projectRoot)
+	state, err := session.LoadRecordingStateForAgent(projectRoot, agentID)
 	if err != nil || state == nil {
 		return
 	}

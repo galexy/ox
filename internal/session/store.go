@@ -223,6 +223,9 @@ func (w *SessionWriter) WriteHeader(meta *StoreMeta) error {
 	if err := w.encoder.Encode(header); err != nil {
 		return fmt.Errorf("write header file=%s: %w", w.filePath, err)
 	}
+	if err := w.file.Sync(); err != nil {
+		return fmt.Errorf("sync header file=%s: %w", w.filePath, err)
+	}
 	return nil
 }
 
