@@ -194,6 +194,9 @@ func isoWeekRange(year, week int) (start, end time.Time) {
 func groupObservationsByDay(observations []distillObservation) map[string][]distillObservation {
 	groups := make(map[string][]distillObservation)
 	for _, obs := range observations {
+		if obs.RecordedAt.IsZero() {
+			continue
+		}
 		day := obs.RecordedAt.Format("2006-01-02")
 		groups[day] = append(groups[day], obs)
 	}
@@ -516,7 +519,9 @@ func determineLayers(state *distillStateV2, explicit string, now time.Time) dist
 
 	if explicit == "monthly" || explicit == "" {
 		lastMonthly := state.lastMonthlyTime()
-		if now.Sub(lastMonthly) >= 30*24*time.Hour {
+		// Use calendar month comparison instead of duration to avoid
+		// missing short months (e.g., Feb has 28 days, not 30).
+		if lastMonthly.IsZero() || lastMonthly.Year() < now.Year() || lastMonthly.Month() < now.Month() {
 			plan.Months = enumerateMonths(lastMonthly, now)
 		}
 	}
@@ -561,30 +566,26 @@ func enumerateWeeks(lastTime, now time.Time) []isoWeek {
 
 // enumerateMonths returns each completed month between lastTime and now.
 // A month is "completed" if its last day has passed relative to now.
+// Starts from the month after lastTime to avoid re-processing.
 func enumerateMonths(lastTime, now time.Time) []string {
 	var months []string
 
-	cursor := lastTime
-	if cursor.IsZero() {
+	var cursor time.Time
+	if lastTime.IsZero() {
 		// If no prior monthly, start from a reasonable lookback (12 months max)
-		cursor = now.AddDate(-1, 0, 0)
+		cursor = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(-1, 0, 0)
+	} else {
+		// Start from the next month after last processed
+		cursor = time.Date(lastTime.Year(), lastTime.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 	}
 
-	for {
-		// Get the month of cursor
-		monthStr := cursor.Format("2006-01")
+	for !cursor.After(now) {
 		monthEnd := endOfMonth(cursor)
-		if !monthEnd.After(now) {
-			// Only add if we haven't added this month already
-			if len(months) == 0 || months[len(months)-1] != monthStr {
-				months = append(months, monthStr)
-			}
-		}
-		// advance to start of next month
-		cursor = time.Date(cursor.Year(), cursor.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-		if cursor.After(now) {
+		if monthEnd.After(now) {
 			break
 		}
+		months = append(months, cursor.Format("2006-01"))
+		cursor = cursor.AddDate(0, 1, 0)
 	}
 
 	return months

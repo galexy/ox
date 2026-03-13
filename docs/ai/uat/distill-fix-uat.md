@@ -57,7 +57,8 @@
 
 **Expected:**
 - Does NOT re-process all historical observations
-- Only shows the new observation for today
+- Shows the new observation for today (may also include same-day observations
+  from before the delete, since `inferDailyHighWater` seeds to start-of-day)
 - Output indicates high-water mark was inferred from existing daily files
 
 5. Run `ox distill`
