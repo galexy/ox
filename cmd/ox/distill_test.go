@@ -442,7 +442,7 @@ func TestInferDailyHighWater_OldNaming(t *testing.T) {
 	os.WriteFile(filepath.Join(dailyDir, "2026-03-10.md"), []byte("day 2"), 0o644)
 
 	got := inferDailyHighWater(tmp)
-	want := time.Date(2026, 3, 10, 23, 59, 59, 0, time.UTC)
+	want := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
 	if !got.Equal(want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -456,7 +456,7 @@ func TestInferDailyHighWater_NewNaming(t *testing.T) {
 	os.WriteFile(filepath.Join(dailyDir, "2026-03-10-019526a0-7e8b-7abc-8def-0123456789ab.md"), []byte("day"), 0o644)
 
 	got := inferDailyHighWater(tmp)
-	want := time.Date(2026, 3, 10, 23, 59, 59, 0, time.UTC)
+	want := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
 	if !got.Equal(want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -471,7 +471,7 @@ func TestInferDailyHighWater_Mixed(t *testing.T) {
 	os.WriteFile(filepath.Join(dailyDir, "2026-03-11-019526a0-7e8b-7abc-8def-0123456789ab.md"), []byte("new"), 0o644)
 
 	got := inferDailyHighWater(tmp)
-	want := time.Date(2026, 3, 11, 23, 59, 59, 0, time.UTC)
+	want := time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC)
 	if !got.Equal(want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -658,7 +658,7 @@ func TestLoadState_FallbackToHighWater(t *testing.T) {
 	if daily.IsZero() {
 		t.Error("expected non-zero lastDailyTime from high-water inference")
 	}
-	wantDaily := time.Date(2026, 3, 10, 23, 59, 59, 0, time.UTC)
+	wantDaily := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
 	if !daily.Equal(wantDaily) {
 		t.Errorf("lastDailyTime = %v, want %v", daily, wantDaily)
 	}

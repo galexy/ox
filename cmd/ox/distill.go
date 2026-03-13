@@ -82,11 +82,13 @@ func inferDailyHighWater(tcPath string) time.Time {
 		return time.Time{}
 	}
 
+	// Use start-of-day so observations from the latest date are re-distilled
+	// rather than silently skipped. UUID7 filenames prevent overwrites.
 	t, err := time.Parse("2006-01-02", latestDate)
 	if err != nil {
 		return time.Time{}
 	}
-	return endOfDay(t)
+	return t
 }
 
 // inferWeeklyHighWater scans memory/weekly/ for latest YYYY-WXX file.
@@ -460,8 +462,10 @@ func runDistill(cmd *cobra.Command, _ []string) error {
 	if plan.Daily {
 		if err := extractDiscussionFacts(ctx, cmd, backend, tc, state, guidelines); err != nil {
 			slog.Warn("discussion fact extraction failed", "error", err)
-		} else if err := saveDistillStateV2(projectRoot, state); err != nil {
-			slog.Warn("failed to save distill state after discussion extraction", "error", err)
+		} else if !distillDryRun {
+			if err := saveDistillStateV2(projectRoot, state); err != nil {
+				slog.Warn("failed to save distill state after discussion extraction", "error", err)
+			}
 		}
 	}
 
