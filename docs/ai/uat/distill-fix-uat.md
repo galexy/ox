@@ -25,7 +25,7 @@
 **Expected:**
 - 3 daily files created: `memory/daily/YYYY-MM-DD-{uuid7}.md` for each day
 - Each file's content references only that day's observations
-- `distill-state-v2.json` shows `last_daily` = end of latest day
+- `distill-state-v2.json` shows `last_daily` = processing timestamp (RFC3339)
 
 ## Scenario 2: Intra-Day Multiple Runs
 

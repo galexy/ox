@@ -487,9 +487,11 @@ func runDistill(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// save updated state
-	if err := saveDistillStateV2(projectRoot, state); err != nil {
-		slog.Warn("failed to save distill state", "error", err)
+	// save updated state (skip in dry-run to avoid side effects)
+	if !distillDryRun {
+		if err := saveDistillStateV2(projectRoot, state); err != nil {
+			slog.Warn("failed to save distill state", "error", err)
+		}
 	}
 
 	return nil
@@ -543,6 +545,7 @@ func enumerateWeeks(lastTime, now time.Time) []isoWeek {
 		// Move cursor to the start of the next week
 		y, w := cursor.ISOWeek()
 		_, weekEnd := isoWeekRange(y, w)
+		// Include this week only if its Sunday has passed (completed) and falls after our cursor
 		if weekEnd.After(cursor) && !weekEnd.After(now) {
 			weeks = append(weeks, isoWeek{Year: y, Week: w})
 		}
@@ -758,7 +761,7 @@ func distillDaily(ctx context.Context, cmd *cobra.Command, backend agentcli.Back
 			slog.Warn("failed to commit daily memory", "error", err)
 		}
 
-		state.DailyCount += len(dayObs)
+		state.DailyCount += len(dayObs) + len(dayFacts)
 		latestDay = day
 		fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n", filePath)
 	}
