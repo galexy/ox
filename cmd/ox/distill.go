@@ -760,8 +760,8 @@ func distillDaily(ctx context.Context, cmd *cobra.Command, backend agentcli.Back
 	}
 
 	if latestDay != "" {
-		t, _ := time.Parse("2006-01-02", latestDay)
-		state.LastDaily = endOfDay(t).Format(time.RFC3339)
+		// Use actual processing time so intra-day re-runs pick up new observations
+		state.LastDaily = now.Format(time.RFC3339)
 		state.LastDailyHash = "" // hash no longer used for per-day bucketing
 	}
 
