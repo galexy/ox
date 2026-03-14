@@ -71,6 +71,14 @@ func scanPendingDiscussions(tcPath string, processed map[string]string) ([]discu
 			continue
 		}
 
+		// skip if fact file already exists (covers fresh clone / deleted state)
+		if _, ok := processed[dirName]; !ok {
+			factFile := filepath.Join(tcPath, "memory", ".discussion-facts", dirName+".md")
+			if _, err := os.Stat(factFile); err == nil {
+				continue
+			}
+		}
+
 		createdAt, err := time.Parse(time.RFC3339, meta.CreatedAt)
 		if err != nil {
 			slog.Debug("malformed discussion timestamp, using zero time", "dir", dirName, "raw", meta.CreatedAt, "error", err)

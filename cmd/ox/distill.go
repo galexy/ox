@@ -16,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sageox/ox/internal/agentcli"
-	"github.com/sageox/ox/internal/auth"
 	"github.com/sageox/ox/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -339,9 +338,7 @@ func init() {
 	distillCmd.Flags().StringVar(&distillLayer, "layer", "", "distill only a specific layer (daily, weekly, monthly)")
 	distillCmd.Flags().BoolVar(&distillDryRun, "dry-run", false, "show what would be distilled without invoking the AI coworker")
 
-	if auth.IsMemoryEnabled() {
-		rootCmd.AddCommand(distillCmd)
-	}
+	rootCmd.AddCommand(distillCmd)
 }
 
 // distillStateV2 tracks per-layer distillation timestamps.
