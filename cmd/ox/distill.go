@@ -929,15 +929,8 @@ func formatDailyMemory(date, content string, obsCount, discussionCount int) stri
 // loadDistillStateV2 loads distill state, migrating from v1 if needed.
 // tcPath is used to infer high-water marks from existing files when no state exists.
 func loadDistillStateV2(projectRoot, tcPath string) *distillStateV2 {
-	// try loading v2 state from cache directory first, then fall back to old location
+	// try loading v2 state from cache directory
 	v2Path := filepath.Join(projectRoot, ".sageox", "cache", "distill-state-v2.json")
-	if _, err := os.Stat(v2Path); os.IsNotExist(err) {
-		// check old location for migration
-		oldPath := filepath.Join(projectRoot, ".sageox", "distill-state-v2.json")
-		if _, err := os.Stat(oldPath); err == nil {
-			v2Path = oldPath
-		}
-	}
 	if data, err := os.ReadFile(v2Path); err == nil {
 		var loaded distillStateV2
 		if err := json.Unmarshal(data, &loaded); err == nil {
