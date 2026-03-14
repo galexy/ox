@@ -929,8 +929,15 @@ func formatDailyMemory(date, content string, obsCount, discussionCount int) stri
 // loadDistillStateV2 loads distill state, migrating from v1 if needed.
 // tcPath is used to infer high-water marks from existing files when no state exists.
 func loadDistillStateV2(projectRoot, tcPath string) *distillStateV2 {
-	// try loading v2 state first
-	v2Path := filepath.Join(projectRoot, ".sageox", "distill-state-v2.json")
+	// try loading v2 state from cache directory first, then fall back to old location
+	v2Path := filepath.Join(projectRoot, ".sageox", "cache", "distill-state-v2.json")
+	if _, err := os.Stat(v2Path); os.IsNotExist(err) {
+		// check old location for migration
+		oldPath := filepath.Join(projectRoot, ".sageox", "distill-state-v2.json")
+		if _, err := os.Stat(oldPath); err == nil {
+			v2Path = oldPath
+		}
+	}
 	if data, err := os.ReadFile(v2Path); err == nil {
 		var loaded distillStateV2
 		if err := json.Unmarshal(data, &loaded); err == nil {
@@ -969,7 +976,11 @@ func loadDistillStateV2(projectRoot, tcPath string) *distillStateV2 {
 // saveDistillStateV2 persists the v2 distill state.
 func saveDistillStateV2(projectRoot string, state *distillStateV2) error {
 	state.SchemaVersion = "2"
-	path := filepath.Join(projectRoot, ".sageox", "distill-state-v2.json")
+	cacheDir := filepath.Join(projectRoot, ".sageox", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
+	}
+	path := filepath.Join(cacheDir, "distill-state-v2.json")
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
