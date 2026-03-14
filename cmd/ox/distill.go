@@ -9,13 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sageox/ox/internal/agentcli"
-	"github.com/sageox/ox/internal/auth"
 	"github.com/sageox/ox/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +29,288 @@ func contentHash(inputs ...string) string {
 		h.Write([]byte{0}) // separator
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// dailyDateRe matches the YYYY-MM-DD prefix of daily memory filenames.
+// Handles both old naming (2026-03-10.md) and new naming (2026-03-10-{uuid7}.md).
+var dailyDateRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})`)
+
+// weeklyRe matches YYYY-WXX weekly filenames.
+var weeklyRe = regexp.MustCompile(`^(\d{4})-W(\d{2})`)
+
+// monthlyRe matches YYYY-MM monthly filenames.
+var monthlyRe = regexp.MustCompile(`^(\d{4}-\d{2})\.md$`)
+
+// distillPlan describes what layers and periods to distill.
+type distillPlan struct {
+	Daily  bool
+	Weeks  []isoWeek
+	Months []string // YYYY-MM
+}
+
+// isoWeek identifies a specific ISO week.
+type isoWeek struct {
+	Year int
+	Week int
+}
+
+// inferDailyHighWater scans memory/daily/ for the latest YYYY-MM-DD prefix.
+// Returns end-of-day UTC for that date, or zero time if no files.
+func inferDailyHighWater(tcPath string) time.Time {
+	dailyDir := filepath.Join(tcPath, "memory", "daily")
+	entries, err := os.ReadDir(dailyDir)
+	if err != nil {
+		return time.Time{}
+	}
+
+	var latestDate string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		m := dailyDateRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		if m[1] > latestDate {
+			latestDate = m[1]
+		}
+	}
+
+	if latestDate == "" {
+		return time.Time{}
+	}
+
+	// Use start-of-day so observations from the latest date are re-distilled
+	// rather than silently skipped. UUID7 filenames prevent overwrites.
+	t, err := time.Parse("2006-01-02", latestDate)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// inferWeeklyHighWater scans memory/weekly/ for latest YYYY-WXX file.
+// Returns end-of-that-week (Sunday 23:59:59 UTC).
+func inferWeeklyHighWater(tcPath string) time.Time {
+	weeklyDir := filepath.Join(tcPath, "memory", "weekly")
+	entries, err := os.ReadDir(weeklyDir)
+	if err != nil {
+		return time.Time{}
+	}
+
+	var latestYear, latestWeek int
+	found := false
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		m := weeklyRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		var y, w int
+		fmt.Sscanf(m[1], "%d", &y)
+		fmt.Sscanf(m[2], "%d", &w)
+		if !found || y > latestYear || (y == latestYear && w > latestWeek) {
+			latestYear, latestWeek = y, w
+			found = true
+		}
+	}
+
+	if !found {
+		return time.Time{}
+	}
+
+	_, end := isoWeekRange(latestYear, latestWeek)
+	return end
+}
+
+// inferMonthlyHighWater scans memory/monthly/ for latest YYYY-MM file.
+// Returns end-of-that-month.
+func inferMonthlyHighWater(tcPath string) time.Time {
+	monthlyDir := filepath.Join(tcPath, "memory", "monthly")
+	entries, err := os.ReadDir(monthlyDir)
+	if err != nil {
+		return time.Time{}
+	}
+
+	var latestMonth string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		m := monthlyRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		if m[1] > latestMonth {
+			latestMonth = m[1]
+		}
+	}
+
+	if latestMonth == "" {
+		return time.Time{}
+	}
+
+	t, err := time.Parse("2006-01", latestMonth)
+	if err != nil {
+		return time.Time{}
+	}
+	return endOfMonth(t)
+}
+
+// endOfDay returns 23:59:59 UTC of the given date.
+func endOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.UTC)
+}
+
+// endOfMonth returns the last second of the given month in UTC.
+func endOfMonth(t time.Time) time.Time {
+	// first day of next month, minus one second
+	return time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
+}
+
+// isoWeekRange returns the Monday 00:00:00 and Sunday 23:59:59 UTC of the given ISO week.
+func isoWeekRange(year, week int) (start, end time.Time) {
+	// Jan 4 is always in ISO week 1
+	jan4 := time.Date(year, 1, 4, 0, 0, 0, 0, time.UTC)
+	// Find Monday of ISO week 1
+	weekday := jan4.Weekday()
+	if weekday == 0 {
+		weekday = 7 // Sunday = 7
+	}
+	week1Monday := jan4.AddDate(0, 0, -int(weekday-1))
+
+	start = week1Monday.AddDate(0, 0, (week-1)*7)
+	end = start.AddDate(0, 0, 6) // Sunday
+	end = time.Date(end.Year(), end.Month(), end.Day(), 23, 59, 59, 0, time.UTC)
+	return start, end
+}
+
+// groupObservationsByDay groups observations by their RecordedAt date.
+// Keys are YYYY-MM-DD strings. Observations within each group maintain their sort order.
+func groupObservationsByDay(observations []distillObservation) map[string][]distillObservation {
+	groups := make(map[string][]distillObservation)
+	for _, obs := range observations {
+		if obs.RecordedAt.IsZero() {
+			continue
+		}
+		day := obs.RecordedAt.Format("2006-01-02")
+		groups[day] = append(groups[day], obs)
+	}
+	return groups
+}
+
+// readDailyFilesForDateRange reads all daily .md files whose YYYY-MM-DD prefix
+// falls within [startDate, endDate] inclusive. Returns contents and filenames.
+func readDailyFilesForDateRange(dailyDir, startDate, endDate string) ([]string, []string, error) {
+	entries, err := os.ReadDir(dailyDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	type dailyFile struct {
+		name string
+		date string
+	}
+	var matched []dailyFile
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		m := dailyDateRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		date := m[1]
+		if date >= startDate && date <= endDate {
+			matched = append(matched, dailyFile{name: e.Name(), date: date})
+		}
+	}
+
+	// sort chronologically (then by full filename for stability within same day)
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].date != matched[j].date {
+			return matched[i].date < matched[j].date
+		}
+		return matched[i].name < matched[j].name
+	})
+
+	var contents, names []string
+	for _, f := range matched {
+		data, err := os.ReadFile(filepath.Join(dailyDir, f.name))
+		if err != nil {
+			continue
+		}
+		contents = append(contents, string(data))
+		names = append(names, f.name)
+	}
+	return contents, names, nil
+}
+
+// readWeeklyFilesForMonth reads weekly .md files whose ISO week overlaps with
+// the given year-month. Returns contents and filenames.
+func readWeeklyFilesForMonth(weeklyDir string, year, month int) ([]string, []string, error) {
+	entries, err := os.ReadDir(weeklyDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := time.Date(year, time.Month(month+1), 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
+
+	type weeklyFile struct {
+		name string
+		year int
+		week int
+	}
+	var matched []weeklyFile
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		m := weeklyRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		var wy, ww int
+		fmt.Sscanf(m[1], "%d", &wy)
+		fmt.Sscanf(m[2], "%d", &ww)
+
+		wStart, wEnd := isoWeekRange(wy, ww)
+		// week overlaps month if week starts before month ends AND week ends after month starts
+		if wStart.Before(monthEnd.Add(time.Second)) && wEnd.After(monthStart.Add(-time.Second)) {
+			matched = append(matched, weeklyFile{name: e.Name(), year: wy, week: ww})
+		}
+	}
+
+	// sort chronologically
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].year != matched[j].year {
+			return matched[i].year < matched[j].year
+		}
+		return matched[i].week < matched[j].week
+	})
+
+	var contents, names []string
+	for _, f := range matched {
+		data, err := os.ReadFile(filepath.Join(weeklyDir, f.name))
+		if err != nil {
+			continue
+		}
+		contents = append(contents, string(data))
+		names = append(names, f.name)
+	}
+	return contents, names, nil
 }
 
 var (
@@ -46,9 +328,9 @@ AI coworker CLI (claude) for LLM-powered summarization, and writes the
 results back as memory files in the team context repo.
 
 Memory files are organized by temporal layers:
-  memory/daily/YYYY-MM-DD.md   — daily summaries from raw observations
-  memory/weekly/YYYY-WXX.md    — weekly synthesis from dailies
-  memory/monthly/YYYY-MM.md    — monthly synthesis from weeklies`,
+  memory/daily/YYYY-MM-DD-{uuid7}.md — daily summaries from raw observations
+  memory/weekly/YYYY-WXX.md          — weekly synthesis from dailies
+  memory/monthly/YYYY-MM.md          — monthly synthesis from weeklies`,
 	RunE: runDistill,
 }
 
@@ -56,9 +338,7 @@ func init() {
 	distillCmd.Flags().StringVar(&distillLayer, "layer", "", "distill only a specific layer (daily, weekly, monthly)")
 	distillCmd.Flags().BoolVar(&distillDryRun, "dry-run", false, "show what would be distilled without invoking the AI coworker")
 
-	if auth.IsMemoryEnabled() {
-		rootCmd.AddCommand(distillCmd)
-	}
+	rootCmd.AddCommand(distillCmd)
 }
 
 // distillStateV2 tracks per-layer distillation timestamps.
@@ -153,7 +433,7 @@ func runDistill(cmd *cobra.Command, _ []string) error {
 	}
 
 	// load distill state (v2 format, backward compat with v1)
-	state := loadDistillStateV2(projectRoot)
+	state := loadDistillStateV2(projectRoot, tc.Path)
 
 	// ensure memory directories exist
 	if err := ensureMemoryDirs(tc.Path); err != nil {
@@ -171,69 +451,141 @@ func runDistill(cmd *cobra.Command, _ []string) error {
 	now := time.Now().UTC()
 
 	// determine which layers to run
-	layers := determineLayers(state, distillLayer, now)
+	plan := determineLayers(state, distillLayer, now)
 
-	if len(layers) == 0 {
+	if plan.isEmpty() {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to distill")
 		return nil
 	}
 
 	// extract facts from unprocessed discussions before daily distill
-	if slices.Contains(layers, "daily") {
+	if plan.Daily {
 		if err := extractDiscussionFacts(ctx, cmd, backend, tc, state, guidelines); err != nil {
 			slog.Warn("discussion fact extraction failed", "error", err)
-		} else if err := saveDistillStateV2(projectRoot, state); err != nil {
-			slog.Warn("failed to save distill state after discussion extraction", "error", err)
-		}
-	}
-
-	for _, layer := range layers {
-		switch layer {
-		case "daily":
-			if err := distillDaily(ctx, cmd, backend, tc, state, projectRoot, now, guidelines); err != nil {
-				return fmt.Errorf("daily distill: %w", err)
-			}
-		case "weekly":
-			if err := distillWeekly(ctx, cmd, backend, tc, state, now, guidelines); err != nil {
-				return fmt.Errorf("weekly distill: %w", err)
-			}
-		case "monthly":
-			if err := distillMonthly(ctx, cmd, backend, tc, state, now, guidelines); err != nil {
-				return fmt.Errorf("monthly distill: %w", err)
+		} else if !distillDryRun {
+			if err := saveDistillStateV2(projectRoot, state); err != nil {
+				slog.Warn("failed to save distill state after discussion extraction", "error", err)
 			}
 		}
 	}
 
-	// save updated state
-	if err := saveDistillStateV2(projectRoot, state); err != nil {
-		slog.Warn("failed to save distill state", "error", err)
+	if plan.Daily {
+		if err := distillDaily(ctx, cmd, backend, tc, state, projectRoot, now, guidelines); err != nil {
+			return fmt.Errorf("daily distill: %w", err)
+		}
+	}
+
+	for _, week := range plan.Weeks {
+		if err := distillWeekly(ctx, cmd, backend, tc, state, week, guidelines); err != nil {
+			return fmt.Errorf("weekly distill (%d-W%02d): %w", week.Year, week.Week, err)
+		}
+	}
+
+	for _, month := range plan.Months {
+		if err := distillMonthly(ctx, cmd, backend, tc, state, month, guidelines); err != nil {
+			return fmt.Errorf("monthly distill (%s): %w", month, err)
+		}
+	}
+
+	// save updated state (skip in dry-run to avoid side effects)
+	if !distillDryRun {
+		if err := saveDistillStateV2(projectRoot, state); err != nil {
+			slog.Warn("failed to save distill state", "error", err)
+		}
 	}
 
 	return nil
 }
 
-// determineLayers returns which distillation layers should run.
-func determineLayers(state *distillStateV2, explicit string, now time.Time) []string {
-	if explicit != "" {
-		return []string{explicit}
+// determineLayers returns a distillPlan describing which layers and periods to distill.
+// When multiple week/month boundaries have been crossed since last run, each gets its own entry.
+func determineLayers(state *distillStateV2, explicit string, now time.Time) distillPlan {
+	var plan distillPlan
+
+	if explicit == "daily" || explicit == "" {
+		plan.Daily = true
 	}
 
-	var layers []string
-
-	// daily: always check for new observations
-	layers = append(layers, "daily")
-
-	// weekly: if 7+ days since last weekly
-	if now.Sub(state.lastWeeklyTime()) >= 7*24*time.Hour {
-		layers = append(layers, "weekly")
+	if explicit == "weekly" || explicit == "" {
+		lastWeekly := state.lastWeeklyTime()
+		if now.Sub(lastWeekly) >= 7*24*time.Hour {
+			// enumerate each ISO week from lastWeekly to now
+			plan.Weeks = enumerateWeeks(lastWeekly, now)
+		}
 	}
 
-	// monthly: if 30+ days since last monthly
-	if now.Sub(state.lastMonthlyTime()) >= 30*24*time.Hour {
-		layers = append(layers, "monthly")
+	if explicit == "monthly" || explicit == "" {
+		lastMonthly := state.lastMonthlyTime()
+		// Use calendar month comparison instead of duration to avoid
+		// missing short months (e.g., Feb has 28 days, not 30).
+		if lastMonthly.IsZero() || lastMonthly.Year() < now.Year() || lastMonthly.Month() < now.Month() {
+			plan.Months = enumerateMonths(lastMonthly, now)
+		}
 	}
 
-	return layers
+	return plan
+}
+
+// isEmpty returns true if there's nothing to distill.
+func (p distillPlan) isEmpty() bool {
+	return !p.Daily && len(p.Weeks) == 0 && len(p.Months) == 0
+}
+
+// enumerateWeeks returns each completed ISO week between lastTime and now.
+// A week is "completed" if its Sunday has passed relative to now.
+func enumerateWeeks(lastTime, now time.Time) []isoWeek {
+	var weeks []isoWeek
+
+	// Start from the week after lastTime
+	cursor := lastTime
+	if cursor.IsZero() {
+		// If no prior weekly, start from a reasonable lookback (13 weeks max)
+		cursor = now.AddDate(0, 0, -91)
+	}
+
+	for {
+		// Move cursor to the start of the next week
+		y, w := cursor.ISOWeek()
+		_, weekEnd := isoWeekRange(y, w)
+		// Include this week only if its Sunday has passed (completed) and falls after our cursor
+		if weekEnd.After(cursor) && !weekEnd.After(now) {
+			weeks = append(weeks, isoWeek{Year: y, Week: w})
+		}
+		// advance to next week
+		cursor = weekEnd.Add(time.Second)
+		if cursor.After(now) {
+			break
+		}
+	}
+
+	return weeks
+}
+
+// enumerateMonths returns each completed month between lastTime and now.
+// A month is "completed" if its last day has passed relative to now.
+// Starts from the month after lastTime to avoid re-processing.
+func enumerateMonths(lastTime, now time.Time) []string {
+	var months []string
+
+	var cursor time.Time
+	if lastTime.IsZero() {
+		// If no prior monthly, start from a reasonable lookback (12 months max)
+		cursor = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(-1, 0, 0)
+	} else {
+		// Start from the next month after last processed
+		cursor = time.Date(lastTime.Year(), lastTime.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	}
+
+	for !cursor.After(now) {
+		monthEnd := endOfMonth(cursor)
+		if monthEnd.After(now) {
+			break
+		}
+		months = append(months, cursor.Format("2006-01"))
+		cursor = cursor.AddDate(0, 1, 0)
+	}
+
+	return months
 }
 
 // extractDiscussionFacts scans for unprocessed discussions and writes fact files.
@@ -323,94 +675,127 @@ func distillDaily(ctx context.Context, cmd *cobra.Command, backend agentcli.Back
 		return fmt.Errorf("scan observations: %w", err)
 	}
 
-	// read discussion facts created since last daily
-	factContents, factPaths, err := readPendingDiscussionFacts(tc.Path, since)
+	// read discussion facts grouped by date (content-based timestamps)
+	factsByDay, err := readPendingDiscussionFacts(tc.Path, since)
 	if err != nil {
 		slog.Warn("failed to read discussion facts", "error", err)
 	}
 
-	if len(observations) == 0 && len(factContents) == 0 {
+	if len(observations) == 0 && len(factsByDay) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No pending observations or discussion facts for daily distill")
 		return nil
 	}
 
-	// extract observation content strings
-	contents := make([]string, len(observations))
-	for i, obs := range observations {
-		contents[i] = obs.Content
+	// group observations by day
+	obsByDay := groupObservationsByDay(observations)
+
+	// union all day keys
+	daySet := make(map[string]bool)
+	for day := range obsByDay {
+		daySet[day] = true
+	}
+	for day := range factsByDay {
+		daySet[day] = true
 	}
 
-	// combined hash incorporates both sources — new facts trigger re-distill
-	hashInputs := append(contents, factContents...)
-	hash := contentHash(hashInputs...)
-	if hash == state.LastDailyHash {
-		fmt.Fprintln(cmd.OutOrStdout(), "Daily input unchanged since last distill, skipping")
-		return nil
+	// sort days chronologically
+	days := make([]string, 0, len(daySet))
+	for day := range daySet {
+		days = append(days, day)
 	}
-
-	date := now.Format("2006-01-02")
+	sort.Strings(days)
 
 	if distillDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "Daily distill: %d observations and %d discussion facts for %s (hash: %s)\n",
-			len(observations), len(factContents), date, hash[:8])
+		for _, day := range days {
+			obsCount := len(obsByDay[day])
+			factCount := len(factsByDay[day])
+			fmt.Fprintf(cmd.OutOrStdout(), "Daily distill: %d observations and %d discussion facts for %s\n",
+				obsCount, factCount, day)
+		}
 		return nil
 	}
 
-	prompt := agentcli.DailyPrompt(contents, date, guidelines, factPaths...)
-	logPrompt(cmd, "daily", prompt)
-	fmt.Fprintf(cmd.OutOrStdout(), "Distilling %d observations and %d discussion facts into daily summary for %s...\n",
-		len(observations), len(factContents), date)
+	var latestDay string
+	for _, day := range days {
+		dayObs := obsByDay[day]
+		dayFacts := factsByDay[day]
 
-	output, err := backend.Run(ctx, prompt)
-	if err != nil {
-		return fmt.Errorf("AI coworker: %w", err)
+		// extract observation content strings
+		contents := make([]string, len(dayObs))
+		for i, obs := range dayObs {
+			contents[i] = obs.Content
+		}
+
+		// extract fact paths for the prompt
+		var factPaths []string
+		for _, f := range dayFacts {
+			factPaths = append(factPaths, f.RelPath)
+		}
+
+		prompt := agentcli.DailyPrompt(contents, day, guidelines, factPaths...)
+		logPrompt(cmd, "daily:"+day, prompt)
+		fmt.Fprintf(cmd.OutOrStdout(), "Distilling %d observations and %d discussion facts into daily summary for %s...\n",
+			len(dayObs), len(dayFacts), day)
+
+		output, err := backend.Run(ctx, prompt)
+		if err != nil {
+			return fmt.Errorf("AI coworker (%s): %w", day, err)
+		}
+
+		// generate UUID7 filename for collision avoidance
+		id, err := uuid.NewV7()
+		if err != nil {
+			return fmt.Errorf("generate daily file ID: %w", err)
+		}
+
+		filePath := filepath.Join("memory", "daily", day+"-"+id.String()+".md")
+		content := formatDailyMemory(day, output, len(dayObs), len(dayFacts))
+
+		if err := writeMemoryFile(tc.Path, filePath, content); err != nil {
+			return fmt.Errorf("write daily memory: %w", err)
+		}
+
+		if err := commitMemoryFile(tc.Path, filePath, fmt.Sprintf("memory: distill daily %s", day)); err != nil {
+			slog.Warn("failed to commit daily memory", "error", err)
+		}
+
+		state.DailyCount += len(dayObs) + len(dayFacts)
+		latestDay = day
+		fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n", filePath)
 	}
 
-	// write daily memory file
-	filePath := filepath.Join("memory", "daily", date+".md")
-	content := formatDailyMemory(date, output, len(observations), len(factContents))
-
-	if err := writeMemoryFile(tc.Path, filePath, content); err != nil {
-		return fmt.Errorf("write daily memory: %w", err)
+	if latestDay != "" {
+		// Use actual processing time so intra-day re-runs pick up new observations
+		state.LastDaily = now.Format(time.RFC3339)
+		state.LastDailyHash = "" // hash no longer used for per-day bucketing
 	}
 
-	if err := commitMemoryFile(tc.Path, filePath, fmt.Sprintf("memory: distill daily %s", date)); err != nil {
-		slog.Warn("failed to commit daily memory", "error", err)
-	}
-
-	state.LastDaily = now.Format(time.RFC3339)
-	state.LastDailyHash = hash
-	state.DailyCount += len(observations)
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n", filePath)
 	return nil
 }
 
-func distillWeekly(ctx context.Context, cmd *cobra.Command, backend agentcli.Backend, tc *config.TeamContext, state *distillStateV2, now time.Time, guidelines string) error {
+func distillWeekly(ctx context.Context, cmd *cobra.Command, backend agentcli.Backend, tc *config.TeamContext, state *distillStateV2, week isoWeek, guidelines string) error {
 	dailyDir := filepath.Join(tc.Path, "memory", "daily")
-	dailySummaries, dailyFiles, err := readRecentMemoryFiles(dailyDir, 7)
-	if err != nil || len(dailySummaries) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No daily summaries available for weekly distill")
+	weekID := fmt.Sprintf("%d-W%02d", week.Year, week.Week)
+	start, end := isoWeekRange(week.Year, week.Week)
+	startDate := start.Format("2006-01-02")
+	endDate := end.Format("2006-01-02")
+
+	dailySummaries, dailyFiles, err := readDailyFilesForDateRange(dailyDir, startDate, endDate)
+	if err != nil {
+		return fmt.Errorf("read daily files for %s: %w", weekID, err)
+	}
+	if len(dailySummaries) == 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "No daily summaries for weekly %s, skipping\n", weekID)
 		return nil
 	}
-
-	// check if input changed
-	hash := contentHash(dailySummaries...)
-	if hash == state.LastWeeklyHash {
-		fmt.Fprintln(cmd.OutOrStdout(), "Weekly input unchanged since last distill, skipping")
-		return nil
-	}
-
-	year, week := now.ISOWeek()
-	weekID := fmt.Sprintf("%d-W%02d", year, week)
 
 	if distillDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "Weekly distill: %d daily summaries for %s (hash: %s)\n", len(dailySummaries), weekID, hash[:8])
+		fmt.Fprintf(cmd.OutOrStdout(), "Weekly distill: %d daily summaries for %s\n", len(dailySummaries), weekID)
 		return nil
 	}
 
 	prompt := agentcli.WeeklyPrompt(dailySummaries, weekID, guidelines)
-	logPrompt(cmd, "weekly", prompt)
+	logPrompt(cmd, "weekly:"+weekID, prompt)
 	fmt.Fprintf(cmd.OutOrStdout(), "Synthesizing %d daily summaries into weekly %s...\n", len(dailySummaries), weekID)
 
 	output, err := backend.Run(ctx, prompt)
@@ -430,37 +815,38 @@ func distillWeekly(ctx context.Context, cmd *cobra.Command, backend agentcli.Bac
 		slog.Warn("failed to commit weekly memory", "error", err)
 	}
 
-	state.LastWeekly = now.Format(time.RFC3339)
-	state.LastWeeklyHash = hash
+	state.LastWeekly = end.Format(time.RFC3339)
+	state.LastWeeklyHash = "" // hash no longer used
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n", filePath)
 	return nil
 }
 
-func distillMonthly(ctx context.Context, cmd *cobra.Command, backend agentcli.Backend, tc *config.TeamContext, state *distillStateV2, now time.Time, guidelines string) error {
+func distillMonthly(ctx context.Context, cmd *cobra.Command, backend agentcli.Backend, tc *config.TeamContext, state *distillStateV2, month string, guidelines string) error {
 	weeklyDir := filepath.Join(tc.Path, "memory", "weekly")
-	weeklySummaries, weeklyFiles, err := readRecentMemoryFiles(weeklyDir, 5)
-	if err != nil || len(weeklySummaries) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No weekly summaries available for monthly distill")
-		return nil
+
+	// parse month string to get year and month
+	t, err := time.Parse("2006-01", month)
+	if err != nil {
+		return fmt.Errorf("parse month %q: %w", month, err)
 	}
 
-	// check if input changed
-	hash := contentHash(weeklySummaries...)
-	if hash == state.LastMonthlyHash {
-		fmt.Fprintln(cmd.OutOrStdout(), "Monthly input unchanged since last distill, skipping")
+	weeklySummaries, weeklyFiles, err := readWeeklyFilesForMonth(weeklyDir, t.Year(), int(t.Month()))
+	if err != nil {
+		return fmt.Errorf("read weekly files for %s: %w", month, err)
+	}
+	if len(weeklySummaries) == 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "No weekly summaries for monthly %s, skipping\n", month)
 		return nil
 	}
-
-	month := now.Format("2006-01")
 
 	if distillDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "Monthly distill: %d weekly summaries for %s (hash: %s)\n", len(weeklySummaries), month, hash[:8])
+		fmt.Fprintf(cmd.OutOrStdout(), "Monthly distill: %d weekly summaries for %s\n", len(weeklySummaries), month)
 		return nil
 	}
 
 	prompt := agentcli.MonthlyPrompt(weeklySummaries, month, guidelines)
-	logPrompt(cmd, "monthly", prompt)
+	logPrompt(cmd, "monthly:"+month, prompt)
 	fmt.Fprintf(cmd.OutOrStdout(), "Synthesizing %d weekly summaries into monthly %s...\n", len(weeklySummaries), month)
 
 	output, err := backend.Run(ctx, prompt)
@@ -480,8 +866,8 @@ func distillMonthly(ctx context.Context, cmd *cobra.Command, backend agentcli.Ba
 		slog.Warn("failed to commit monthly memory", "error", err)
 	}
 
-	state.LastMonthly = now.Format(time.RFC3339)
-	state.LastMonthlyHash = hash
+	state.LastMonthly = endOfMonth(t).Format(time.RFC3339)
+	state.LastMonthlyHash = "" // hash no longer used
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n", filePath)
 	return nil
@@ -541,9 +927,10 @@ func formatDailyMemory(date, content string, obsCount, discussionCount int) stri
 }
 
 // loadDistillStateV2 loads distill state, migrating from v1 if needed.
-func loadDistillStateV2(projectRoot string) *distillStateV2 {
-	// try loading v2 state first
-	v2Path := filepath.Join(projectRoot, ".sageox", "distill-state-v2.json")
+// tcPath is used to infer high-water marks from existing files when no state exists.
+func loadDistillStateV2(projectRoot, tcPath string) *distillStateV2 {
+	// try loading v2 state from cache directory
+	v2Path := filepath.Join(projectRoot, ".sageox", "cache", "distill-state-v2.json")
 	if data, err := os.ReadFile(v2Path); err == nil {
 		var loaded distillStateV2
 		if err := json.Unmarshal(data, &loaded); err == nil {
@@ -562,6 +949,18 @@ func loadDistillStateV2(projectRoot string) *distillStateV2 {
 		state.TeamID = v1State.TeamID
 		state.LastDistilled = v1State.LastDistilled
 		state.ObservationCount = v1State.ObservationCount
+		return state
+	}
+
+	// no state at all — infer from existing memory files to avoid reprocessing
+	if t := inferDailyHighWater(tcPath); !t.IsZero() {
+		state.LastDaily = t.Format(time.RFC3339)
+	}
+	if t := inferWeeklyHighWater(tcPath); !t.IsZero() {
+		state.LastWeekly = t.Format(time.RFC3339)
+	}
+	if t := inferMonthlyHighWater(tcPath); !t.IsZero() {
+		state.LastMonthly = t.Format(time.RFC3339)
 	}
 
 	return state
@@ -570,7 +969,11 @@ func loadDistillStateV2(projectRoot string) *distillStateV2 {
 // saveDistillStateV2 persists the v2 distill state.
 func saveDistillStateV2(projectRoot string, state *distillStateV2) error {
 	state.SchemaVersion = "2"
-	path := filepath.Join(projectRoot, ".sageox", "distill-state-v2.json")
+	cacheDir := filepath.Join(projectRoot, ".sageox", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
+	}
+	path := filepath.Join(cacheDir, "distill-state-v2.json")
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err

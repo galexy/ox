@@ -162,68 +162,121 @@ func TestReadPendingDiscussionFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// write two fact files
-	os.WriteFile(filepath.Join(factsDir, "discussion-a.md"), []byte("Fact A"), 0o644)
-	os.WriteFile(filepath.Join(factsDir, "discussion-b.md"), []byte("Fact B"), 0o644)
+	// write two fact files with footer dates
+	os.WriteFile(filepath.Join(factsDir, "2026-03-10-1423-ryan.md"),
+		[]byte("Fact A\n\n---\n*Extracted from discussion: 2026-03-10-1423-ryan (created 2026-03-10)*\n"), 0o644)
+	os.WriteFile(filepath.Join(factsDir, "2026-03-11-0900-alice.md"),
+		[]byte("Fact B\n\n---\n*Extracted from discussion: 2026-03-11-0900-alice (created 2026-03-11)*\n"), 0o644)
 
-	contents, paths, err := readPendingDiscussionFacts(tcPath, time.Time{})
+	factsByDay, err := readPendingDiscussionFacts(tcPath, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(contents) != 2 {
-		t.Errorf("expected 2 contents, got %d", len(contents))
+	totalFacts := 0
+	for _, facts := range factsByDay {
+		totalFacts += len(facts)
 	}
-	if len(paths) != 2 {
-		t.Errorf("expected 2 paths, got %d", len(paths))
+	if totalFacts != 2 {
+		t.Errorf("expected 2 total facts, got %d", totalFacts)
 	}
-	for _, p := range paths {
-		if !strings.HasPrefix(p, "memory/.discussion-facts/") {
-			t.Errorf("expected relative path, got %q", p)
+	for _, facts := range factsByDay {
+		for _, f := range facts {
+			if !strings.HasPrefix(f.RelPath, "memory/.discussion-facts/") {
+				t.Errorf("expected relative path, got %q", f.RelPath)
+			}
 		}
 	}
 }
 
-func TestReadPendingDiscussionFactsSince(t *testing.T) {
+func TestReadDiscussionFacts_ParsesDateFromFooter(t *testing.T) {
 	tcPath := t.TempDir()
 	factsDir := filepath.Join(tcPath, "memory", ".discussion-facts")
-	if err := os.MkdirAll(factsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	os.MkdirAll(factsDir, 0o755)
 
-	// write a fact file
-	factPath := filepath.Join(factsDir, "discussion-a.md")
-	os.WriteFile(factPath, []byte("Fact A"), 0o644)
+	// Write fact file with footer date — set mtime to 2020 to prove it's ignored
+	factPath := filepath.Join(factsDir, "some-discussion.md")
+	os.WriteFile(factPath, []byte("Facts here\n\n---\n*Extracted from discussion: test (created 2026-03-10)*\n"), 0o644)
+	oldTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	os.Chtimes(factPath, oldTime, oldTime)
 
-	// set modtime to the past
-	past := time.Now().Add(-48 * time.Hour)
-	os.Chtimes(factPath, past, past)
-
-	// read with since = 24h ago — should skip the old file
-	since := time.Now().Add(-24 * time.Hour)
-	contents, paths, err := readPendingDiscussionFacts(tcPath, since)
+	factsByDay, err := readPendingDiscussionFacts(tcPath, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(contents) != 0 {
-		t.Errorf("expected 0 contents (file is older than since), got %d", len(contents))
+	if _, ok := factsByDay["2026-03-10"]; !ok {
+		t.Errorf("expected facts grouped under 2026-03-10, got keys: %v", factsByDay)
 	}
-	if len(paths) != 0 {
-		t.Errorf("expected 0 paths (file is older than since), got %d", len(paths))
+}
+
+func TestReadDiscussionFacts_FallbackToFilename(t *testing.T) {
+	tcPath := t.TempDir()
+	factsDir := filepath.Join(tcPath, "memory", ".discussion-facts")
+	os.MkdirAll(factsDir, 0o755)
+
+	// No footer date — should fall back to filename prefix
+	os.WriteFile(filepath.Join(factsDir, "2026-03-11-1423-ryan.md"),
+		[]byte("Facts without footer date"), 0o644)
+
+	factsByDay, err := readPendingDiscussionFacts(tcPath, time.Time{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := factsByDay["2026-03-11"]; !ok {
+		t.Errorf("expected facts grouped under 2026-03-11, got keys: %v", factsByDay)
+	}
+}
+
+func TestReadDiscussionFacts_GroupsByDate(t *testing.T) {
+	tcPath := t.TempDir()
+	factsDir := filepath.Join(tcPath, "memory", ".discussion-facts")
+	os.MkdirAll(factsDir, 0o755)
+
+	os.WriteFile(filepath.Join(factsDir, "2026-03-10-ryan.md"),
+		[]byte("Day 1 facts\n\n---\n*(created 2026-03-10)*\n"), 0o644)
+	os.WriteFile(filepath.Join(factsDir, "2026-03-11-alice.md"),
+		[]byte("Day 2 facts\n\n---\n*(created 2026-03-11)*\n"), 0o644)
+
+	factsByDay, err := readPendingDiscussionFacts(tcPath, time.Time{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(factsByDay) != 2 {
+		t.Errorf("expected 2 date groups, got %d", len(factsByDay))
+	}
+}
+
+func TestReadDiscussionFacts_SinceFilter(t *testing.T) {
+	tcPath := t.TempDir()
+	factsDir := filepath.Join(tcPath, "memory", ".discussion-facts")
+	os.MkdirAll(factsDir, 0o755)
+
+	os.WriteFile(filepath.Join(factsDir, "2026-03-08-old.md"),
+		[]byte("Old fact\n\n---\n*(created 2026-03-08)*\n"), 0o644)
+	os.WriteFile(filepath.Join(factsDir, "2026-03-11-new.md"),
+		[]byte("New fact\n\n---\n*(created 2026-03-11)*\n"), 0o644)
+
+	since := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	factsByDay, err := readPendingDiscussionFacts(tcPath, since)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := factsByDay["2026-03-08"]; ok {
+		t.Error("expected old facts to be filtered out by since")
+	}
+	if _, ok := factsByDay["2026-03-11"]; !ok {
+		t.Error("expected new facts to be included")
 	}
 }
 
 func TestReadPendingDiscussionFactsEmptyDir(t *testing.T) {
 	tcPath := t.TempDir() // no .discussion-facts dir
 
-	contents, paths, err := readPendingDiscussionFacts(tcPath, time.Time{})
+	factsByDay, err := readPendingDiscussionFacts(tcPath, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(contents) != 0 {
-		t.Errorf("expected 0 contents for nonexistent dir, got %d", len(contents))
-	}
-	if len(paths) != 0 {
-		t.Errorf("expected 0 paths for nonexistent dir, got %d", len(paths))
+	if len(factsByDay) != 0 {
+		t.Errorf("expected 0 groups for nonexistent dir, got %d", len(factsByDay))
 	}
 }
 
@@ -281,7 +334,7 @@ func TestDistillStateProcessedDiscussionsRoundtrip(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	loaded := loadDistillStateV2(tmp)
+	loaded := loadDistillStateV2(tmp, tmp)
 	if len(loaded.ProcessedDiscussions) != 2 {
 		t.Fatalf("expected 2 processed discussions, got %d", len(loaded.ProcessedDiscussions))
 	}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -68,6 +69,14 @@ func scanPendingDiscussions(tcPath string, processed map[string]string) ([]discu
 		// skip if already processed with same hash
 		if prevHash, ok := processed[dirName]; ok && prevHash == currentHash {
 			continue
+		}
+
+		// skip if fact file already exists (covers fresh clone / deleted state)
+		if _, ok := processed[dirName]; !ok {
+			factFile := filepath.Join(tcPath, "memory", ".discussion-facts", dirName+".md")
+			if _, err := os.Stat(factFile); err == nil {
+				continue
+			}
 		}
 
 		createdAt, err := time.Parse(time.RFC3339, meta.CreatedAt)
@@ -160,30 +169,37 @@ func discussionContentHash(dirPath string) string {
 	return contentHash(parts...)
 }
 
+// discussionFactEntry represents a single discussion fact file with its parsed date.
+type discussionFactEntry struct {
+	Content string
+	RelPath string
+	Date    string // YYYY-MM-DD
+}
+
+// factFooterDateRe matches the "(created YYYY-MM-DD)" footer in discussion fact files.
+var factFooterDateRe = regexp.MustCompile(`\(created (\d{4}-\d{2}-\d{2})\)`)
+
+// factFilenameDateRe matches YYYY-MM-DD prefix in discussion fact filenames / dirnames.
+var factFilenameDateRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})`)
+
 // readPendingDiscussionFacts reads fact files from memory/.discussion-facts/
-// that were created since the given timestamp.
-// Returns file contents (for hashing) and relative paths from the team context root (for prompts).
-func readPendingDiscussionFacts(tcPath string, since time.Time) (contents []string, relPaths []string, err error) {
+// that were created since the given timestamp, grouped by parsed date.
+// Dates are parsed from content (footer) or filename, not filesystem mtime.
+// Returns a map of YYYY-MM-DD → []discussionFactEntry.
+func readPendingDiscussionFacts(tcPath string, since time.Time) (map[string][]discussionFactEntry, error) {
 	factsDir := filepath.Join(tcPath, "memory", ".discussion-facts")
 	entries, err := os.ReadDir(factsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, nil
+			return nil, nil
 		}
-		return nil, nil, fmt.Errorf("read discussion-facts dir: %w", err)
+		return nil, fmt.Errorf("read discussion-facts dir: %w", err)
 	}
+
+	result := make(map[string][]discussionFactEntry)
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		// check modification time
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if !since.IsZero() && info.ModTime().Before(since) {
 			continue
 		}
 
@@ -191,11 +207,50 @@ func readPendingDiscussionFacts(tcPath string, since time.Time) (contents []stri
 		if err != nil {
 			continue
 		}
-		if content := strings.TrimSpace(string(data)); content != "" {
-			contents = append(contents, content)
-			relPaths = append(relPaths, filepath.Join("memory", ".discussion-facts", entry.Name()))
+		content := strings.TrimSpace(string(data))
+		if content == "" {
+			continue
 		}
+
+		// parse date from footer first, then fallback to filename
+		date := parseFactDate(content, entry.Name())
+		if date == "" {
+			continue
+		}
+
+		// filter by since
+		if !since.IsZero() {
+			factDate, err := time.Parse("2006-01-02", date)
+			if err == nil && factDate.Before(since.Truncate(24*time.Hour)) {
+				continue
+			}
+		}
+
+		result[date] = append(result[date], discussionFactEntry{
+			Content: content,
+			RelPath: filepath.Join("memory", ".discussion-facts", entry.Name()),
+			Date:    date,
+		})
 	}
 
-	return contents, relPaths, nil
+	return result, nil
+}
+
+// parseFactDate extracts a YYYY-MM-DD date from fact file content footer
+// or falls back to parsing the filename prefix.
+func parseFactDate(content, filename string) string {
+	// try footer: "(created 2026-03-10)"
+	if m := factFooterDateRe.FindStringSubmatch(content); m != nil {
+		if t, err := time.Parse("2006-01-02", m[1]); err == nil && t.Year() > 1 {
+			return m[1]
+		}
+	}
+	// fallback: filename prefix "2026-03-10-1423-ryan.md" → "2026-03-10"
+	if m := factFilenameDateRe.FindStringSubmatch(filename); m != nil {
+		if t, err := time.Parse("2006-01-02", m[1]); err == nil && t.Year() > 1 {
+			return m[1]
+		}
+	}
+	return ""
+	return ""
 }
