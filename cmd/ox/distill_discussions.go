@@ -241,11 +241,16 @@ func readPendingDiscussionFacts(tcPath string, since time.Time) (map[string][]di
 func parseFactDate(content, filename string) string {
 	// try footer: "(created 2026-03-10)"
 	if m := factFooterDateRe.FindStringSubmatch(content); m != nil {
-		return m[1]
+		if t, err := time.Parse("2006-01-02", m[1]); err == nil && t.Year() > 1 {
+			return m[1]
+		}
 	}
 	// fallback: filename prefix "2026-03-10-1423-ryan.md" → "2026-03-10"
 	if m := factFilenameDateRe.FindStringSubmatch(filename); m != nil {
-		return m[1]
+		if t, err := time.Parse("2006-01-02", m[1]); err == nil && t.Year() > 1 {
+			return m[1]
+		}
 	}
+	return ""
 	return ""
 }
