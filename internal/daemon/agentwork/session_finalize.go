@@ -415,7 +415,8 @@ func isStaleRecording(recPath string, info os.FileInfo, pidLookup func(string) i
 		}
 	}
 
-	// if we have a PID, check liveness — dead process = stale immediately
+	// if we have a PID, check liveness — dead process = stale immediately,
+	// live process = never stale (wait for next cycle)
 	if pid > 0 {
 		proc, procErr := os.FindProcess(pid)
 		if procErr != nil || proc.Signal(syscall.Signal(0)) != nil {
